@@ -28,14 +28,28 @@ function notifyAuth(ctx: AddAccountAndLoginContext, info: OAuthAuthInfo): void {
   ctx.ui.notify(message, "info");
 }
 
+async function promptForRequiredInput(
+  ctx: AddAccountAndLoginContext,
+  message: string,
+  placeholder?: string,
+): Promise<string> {
+  const value = placeholder === undefined
+    ? await ctx.ui.input(message)
+    : await ctx.ui.input(message, placeholder);
+
+  if (value === undefined) {
+    throw new Error("Authentication input cancelled by user");
+  }
+
+  return value;
+}
+
 async function promptForText(ctx: AddAccountAndLoginContext, prompt: OAuthPrompt): Promise<string> {
-  return prompt.placeholder === undefined
-    ? (await ctx.ui.input(prompt.message)) ?? ""
-    : (await ctx.ui.input(prompt.message, prompt.placeholder)) ?? "";
+  return promptForRequiredInput(ctx, prompt.message, prompt.placeholder);
 }
 
 async function promptForManualCode(ctx: AddAccountAndLoginContext): Promise<string> {
-  return (await ctx.ui.input("Enter authentication code")) ?? "";
+  return promptForRequiredInput(ctx, "Paste the authorization code or full redirect URL:");
 }
 
 export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Promise<string> {

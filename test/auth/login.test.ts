@@ -100,7 +100,7 @@ describe("addAccountAndLogin", () => {
       }),
     );
     expect(input).toHaveBeenNthCalledWith(1, "Paste the callback URL:");
-    expect(input).toHaveBeenNthCalledWith(2, "Enter authentication code");
+    expect(input).toHaveBeenNthCalledWith(2, "Paste the authorization code or full redirect URL:");
     expect(notify).toHaveBeenNthCalledWith(
       1,
       "Enter the device code shown in your browser.\nhttps://auth.example/device",
@@ -114,5 +114,149 @@ describe("addAccountAndLogin", () => {
       "login:openai-codex-3",
       "refresh",
     ]);
+  });
+
+  it("notifies with just the auth URL when no instructions are provided", async () => {
+    const notify = vi.fn();
+    const input = vi.fn().mockResolvedValue("https://callback.example/?code=from-prompt");
+    const authStorage = {
+      login: vi.fn(async (_providerName: string, callbacks: {
+        onAuth: (info: { url: string; instructions?: string }) => void;
+        onPrompt: (prompt: { message: string }) => Promise<string>;
+      }) => {
+        callbacks.onAuth({ url: "https://auth.example/device" });
+        await callbacks.onPrompt({ message: "Paste the callback URL:" });
+      }),
+    };
+
+    await addAccountAndLogin({
+      family: "openai-codex",
+      existingProviderNames: ["openai-codex"],
+      adapter: {
+        family: "openai-codex",
+        displayName: "ChatGPT Plus/Pro (Codex)",
+        capabilities: { usage: true, silentFailover: true, nativeLogin: true, reauth: true, experimental: false },
+        buildAliasOAuth: vi.fn(() => ({
+          name: "ChatGPT Plus/Pro (Codex) #2",
+          async login() {
+            return { access: "a", refresh: "r", expires: Date.now() + 60_000 };
+          },
+          async refreshToken(credentials: unknown) {
+            return credentials;
+          },
+          getApiKey() {
+            return "token";
+          },
+        })),
+      },
+      registerAliasProvider: vi.fn(async () => {}),
+      ctx: {
+        modelRegistry: {
+          authStorage,
+          refresh: vi.fn(),
+          getAll: vi.fn(() => []),
+          getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
+        },
+        ui: { notify, input },
+      },
+      pi: { registerProvider: vi.fn() },
+    });
+
+    expect(notify).toHaveBeenCalledWith("https://auth.example/device", "info");
+  });
+
+  it("throws a clear error when the user cancels prompted input", async () => {
+    const authStorage = {
+      login: vi.fn(async (_providerName: string, callbacks: {
+        onPrompt: (prompt: { message: string }) => Promise<string>;
+      }) => {
+        await callbacks.onPrompt({ message: "Paste the callback URL:" });
+      }),
+    };
+
+    await expect(
+      addAccountAndLogin({
+        family: "openai-codex",
+        existingProviderNames: ["openai-codex"],
+        adapter: {
+          family: "openai-codex",
+          displayName: "ChatGPT Plus/Pro (Codex)",
+          capabilities: { usage: true, silentFailover: true, nativeLogin: true, reauth: true, experimental: false },
+          buildAliasOAuth: vi.fn(() => ({
+            name: "ChatGPT Plus/Pro (Codex) #2",
+            async login() {
+              return { access: "a", refresh: "r", expires: Date.now() + 60_000 };
+            },
+            async refreshToken(credentials: unknown) {
+              return credentials;
+            },
+            getApiKey() {
+              return "token";
+            },
+          })),
+        },
+        registerAliasProvider: vi.fn(async () => {}),
+        ctx: {
+          modelRegistry: {
+            authStorage,
+            refresh: vi.fn(),
+            getAll: vi.fn(() => []),
+            getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
+          },
+          ui: { notify: vi.fn(), input: vi.fn().mockResolvedValue(undefined) },
+        },
+        pi: { registerProvider: vi.fn() },
+      }),
+    ).rejects.toThrow("Authentication input cancelled by user");
+  });
+
+  it("throws a clear error when the user cancels manual code input", async () => {
+    const authStorage = {
+      login: vi.fn(async (_providerName: string, callbacks: {
+        onPrompt: (prompt: { message: string }) => Promise<string>;
+        onManualCodeInput?: () => Promise<string>;
+      }) => {
+        await callbacks.onPrompt({ message: "Paste the callback URL:" });
+        await callbacks.onManualCodeInput?.();
+      }),
+    };
+
+    await expect(
+      addAccountAndLogin({
+        family: "openai-codex",
+        existingProviderNames: ["openai-codex"],
+        adapter: {
+          family: "openai-codex",
+          displayName: "ChatGPT Plus/Pro (Codex)",
+          capabilities: { usage: true, silentFailover: true, nativeLogin: true, reauth: true, experimental: false },
+          buildAliasOAuth: vi.fn(() => ({
+            name: "ChatGPT Plus/Pro (Codex) #2",
+            async login() {
+              return { access: "a", refresh: "r", expires: Date.now() + 60_000 };
+            },
+            async refreshToken(credentials: unknown) {
+              return credentials;
+            },
+            getApiKey() {
+              return "token";
+            },
+          })),
+        },
+        registerAliasProvider: vi.fn(async () => {}),
+        ctx: {
+          modelRegistry: {
+            authStorage,
+            refresh: vi.fn(),
+            getAll: vi.fn(() => []),
+            getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
+          },
+          ui: {
+            notify: vi.fn(),
+            input: vi.fn().mockResolvedValueOnce("https://callback.example/?code=from-prompt").mockResolvedValueOnce(undefined),
+          },
+        },
+        pi: { registerProvider: vi.fn() },
+      }),
+    ).rejects.toThrow("Authentication input cancelled by user");
   });
 });
