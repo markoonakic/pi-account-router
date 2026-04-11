@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@mariozechner/pi-ai/oauth", () => ({
   loginOpenAICodex: vi.fn(),
@@ -9,7 +9,11 @@ import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/o
 
 import { classifyCodexRetry } from "../../src/adapters/codex/classify.js";
 import { createCodexAdapter } from "../../src/adapters/codex/index.js";
-import { parseCodexUsage } from "../../src/adapters/codex/usage.js";
+import { buildCodexAccountSnapshot, parseCodexUsage } from "../../src/adapters/codex/usage.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("codex adapter", () => {
   it("parses 5h and 7d usage windows by window length and returns remaining percentages", () => {
@@ -30,6 +34,23 @@ describe("codex adapter", () => {
     });
   });
 
+  it("builds a codex account snapshot with summary, score, and badges", () => {
+    const parsed = parseCodexUsage({
+      plan_type: "chatgpt-pro",
+      rate_limit: {
+        primary_window: { used_percent: 35, limit_window_seconds: 604_800, reset_at: 2_000_604_800 },
+        secondary_window: { used_percent: 20, limit_window_seconds: 18_000, reset_at: 2_000_000_000 },
+      },
+    });
+
+    expect(buildCodexAccountSnapshot(parsed)).toEqual({
+      summary: "chatgpt-pro | 5h 80% | 7d 65%",
+      details: ["chatgpt-pro", "5h 80%", "7d 65%"],
+      score: 145,
+      badges: ["usage", "silent failover", "native login"],
+    });
+  });
+
   it("classifies quota, auth, and other failures", () => {
     expect(classifyCodexRetry("429 rate limit exceeded")).toMatchObject({
       action: "retry",
@@ -45,6 +66,66 @@ describe("codex adapter", () => {
     expect(classifyCodexRetry("unexpected server crash")).toEqual({
       action: "surface",
       reason: "other",
+    });
+  });
+
+  it("fetches codex usage snapshots through the adapter when auth is available", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        plan_type: "chatgpt-pro",
+        rate_limit: {
+          primary_window: { used_percent: 35, limit_window_seconds: 604_800, reset_at: 2_000_604_800 },
+          secondary_window: { used_percent: 20, limit_window_seconds: 18_000, reset_at: 2_000_000_000 },
+        },
+      }),
+    })));
+
+    const adapter = createCodexAdapter();
+    const snapshot = await adapter.createSnapshot?.({
+      providerName: "openai-codex-2",
+      auth: { access: "access-token", accountId: "acct_123" },
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://chatgpt.com/backend-api/wham/usage",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer access-token",
+          "chatgpt-account-id": "acct_123",
+        }),
+      }),
+    );
+    expect(snapshot).toEqual({
+      summary: "chatgpt-pro | 5h 80% | 7d 65%",
+      details: ["chatgpt-pro", "5h 80%", "7d 65%"],
+      score: 145,
+      badges: ["usage", "silent failover", "native login"],
+    });
+  });
+
+  it("degrades codex snapshots gracefully when auth is missing or fetch fails", async () => {
+    const adapter = createCodexAdapter();
+
+    await expect(adapter.createSnapshot?.({ providerName: "openai-codex-2" })).resolves.toEqual({
+      summary: "",
+      details: [],
+      score: 0,
+      badges: ["usage", "silent failover", "native login"],
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network unavailable");
+    }));
+
+    await expect(
+      adapter.createSnapshot?.({ providerName: "openai-codex-2", auth: { access: "access-token" } }),
+    ).resolves.toEqual({
+      summary: "",
+      details: [],
+      score: 0,
+      badges: ["usage", "silent failover", "native login"],
     });
   });
 

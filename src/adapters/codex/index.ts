@@ -2,9 +2,10 @@ import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/o
 
 import type { ProviderAdapter } from "../types.js";
 import { classifyCodexRetry } from "./classify.js";
+import { fetchCodexAccountSnapshot } from "./usage.js";
 
 export { classifyCodexRetry } from "./classify.js";
-export { parseCodexUsage, type ParsedCodexUsage } from "./usage.js";
+export { buildCodexAccountSnapshot, fetchCodexAccountSnapshot, parseCodexUsage, type ParsedCodexUsage } from "./usage.js";
 
 export function createCodexAdapter(): ProviderAdapter {
   return {
@@ -37,6 +38,9 @@ export function createCodexAdapter(): ProviderAdapter {
           return (credentials as { access: string }).access;
         },
       };
+    },
+    async createSnapshot(account, signal) {
+      return fetchCodexAccountSnapshot(account, signal);
     },
     classifyRetry: classifyCodexRetry,
   };
