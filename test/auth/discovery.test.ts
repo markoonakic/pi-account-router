@@ -95,4 +95,54 @@ describe("discoverAccounts", () => {
       },
     ]);
   });
+
+  it("ignores null and undefined credentials instead of throwing", () => {
+    const authStorage = {
+      getAll() {
+        return {
+          anthropic: null,
+          "anthropic-2": undefined,
+          "openai-codex": { type: "oauth" },
+        };
+      },
+    };
+
+    expect(discoverAccounts(authStorage)).toEqual([
+      {
+        family: "openai-codex",
+        providerName: "openai-codex",
+        aliasIndex: 1,
+        authenticated: true,
+        authType: "oauth",
+      },
+    ]);
+  });
+
+  it("normalizes both api_key and apiKey credentials as apiKey auth", () => {
+    const authStorage = {
+      getAll() {
+        return {
+          anthropic: { type: "api_key" },
+          "openai-codex": { type: "apiKey" },
+        };
+      },
+    };
+
+    expect(discoverAccounts(authStorage)).toEqual([
+      {
+        family: "anthropic",
+        providerName: "anthropic",
+        aliasIndex: 1,
+        authenticated: true,
+        authType: "apiKey",
+      },
+      {
+        family: "openai-codex",
+        providerName: "openai-codex",
+        aliasIndex: 1,
+        authenticated: true,
+        authType: "apiKey",
+      },
+    ]);
+  });
 });

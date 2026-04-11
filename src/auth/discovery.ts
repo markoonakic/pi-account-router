@@ -2,11 +2,11 @@ import type { ProviderFamilyId } from "../adapters/types.js";
 import { getAliasIndex, getFamilyForProviderName } from "../providers/families.js";
 
 export interface StoredCredential {
-  type: string;
+  type?: unknown;
 }
 
 export interface AuthStorageLike {
-  getAll(): Record<string, StoredCredential>;
+  getAll(): Record<string, StoredCredential | null | undefined>;
 }
 
 export interface DiscoveredAccount {
@@ -17,12 +17,16 @@ export interface DiscoveredAccount {
   authType: "oauth" | "apiKey";
 }
 
-function getDiscoveredAuthType(credential: StoredCredential): DiscoveredAccount["authType"] | undefined {
+function getDiscoveredAuthType(credential: StoredCredential | null | undefined): DiscoveredAccount["authType"] | undefined {
+  if (!credential || typeof credential !== "object") {
+    return undefined;
+  }
+
   if (credential.type === "oauth") {
     return "oauth";
   }
 
-  if (credential.type === "api_key") {
+  if (credential.type === "api_key" || credential.type === "apiKey") {
     return "apiKey";
   }
 
