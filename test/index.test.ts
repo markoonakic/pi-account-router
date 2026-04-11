@@ -13,13 +13,32 @@ describe("pi-account-router bootstrap", () => {
     expect(registerCommand).toHaveBeenCalledWith(
       "account-router",
       expect.objectContaining({
-        description: expect.stringMatching(/account routing/i),
+        description: expect.stringMatching(/routed provider accounts/i),
         handler: expect.any(Function),
       }),
     );
   });
 
-  it("notifies when the account-router scaffold command runs", async () => {
+  it("wires the account-router command surface through installAccountRouter", async () => {
+    const registerCommand = vi.fn();
+    const notify = vi.fn();
+
+    installExtension({ registerCommand } as unknown as ExtensionAPI);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("status", {
+      hasUI: true,
+      ui: { notify },
+    } as unknown as ExtensionCommandContext);
+
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/scaffold loaded/i), "info");
+  });
+
+  it("uses the shared command fallback when no UI is available", async () => {
     const registerCommand = vi.fn();
     const notify = vi.fn();
 
@@ -31,10 +50,10 @@ describe("pi-account-router bootstrap", () => {
     ];
 
     await command.handler("", {
-      hasUI: true,
+      hasUI: false,
       ui: { notify },
     } as unknown as ExtensionCommandContext);
 
-    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/pi-account-router scaffold loaded/i), "info");
+    expect(notify).toHaveBeenCalledWith("No routed accounts discovered", "info");
   });
 });
