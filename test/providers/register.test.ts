@@ -105,6 +105,57 @@ describe("provider registration from the live model registry", () => {
     }
   });
 
+  it("strips secret-like resolved headers while preserving safe live override headers", async () => {
+    const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
+
+    try {
+      const sourceModel = modelRegistry.find("openai-codex", "gpt-5.4");
+      expect(sourceModel).toBeDefined();
+
+      const clonedModels = await cloneLiveRegistryModels(
+        {
+          getAll: () => [sourceModel!],
+          async getApiKeyAndHeaders() {
+            return {
+              ok: true,
+              headers: {
+                Authorization: "Bearer secret",
+                "Proxy-Authorization": "Basic secret",
+                "x-api-key": "secret",
+                "api-key": "secret",
+                Cookie: "session=secret",
+                "Set-Cookie": "session=secret",
+                "X-Auth-Token": "secret",
+                "x-live-override": "true",
+                "x-extra-safe": "kept",
+              },
+            };
+          },
+        },
+        "openai-codex",
+        "openai-codex-2",
+      );
+
+      expect(clonedModels).toHaveLength(1);
+      expect(clonedModels[0]).toMatchObject({
+        provider: "openai-codex-2",
+        headers: {
+          "x-live-override": "true",
+          "x-extra-safe": "kept",
+        },
+      });
+      expect(clonedModels[0]?.headers).not.toHaveProperty("Authorization");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("Proxy-Authorization");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("x-api-key");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("api-key");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("Cookie");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("Set-Cookie");
+      expect(clonedModels[0]?.headers).not.toHaveProperty("X-Auth-Token");
+    } finally {
+      cleanup();
+    }
+  });
+
   it("registers alias providers with cloned live models and the live api", async () => {
     const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
     const oauth = {

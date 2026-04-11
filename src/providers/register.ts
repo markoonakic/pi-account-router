@@ -54,6 +54,7 @@ export async function registerTransparentBaseProvider(
 
   pi.registerProvider(providerName, {
     api: firstModel.api,
+    // Intentionally omit `models`: Pi keeps the live merged model list for base providers.
     streamSimple,
   });
 }

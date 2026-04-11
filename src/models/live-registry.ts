@@ -22,13 +22,46 @@ function cloneRecord(record: Record<string, string>): Record<string, string> {
   return { ...record };
 }
 
+const exactSecretHeaderNames = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "api-key",
+  "cookie",
+  "set-cookie",
+]);
+
+function isSecretLikeHeaderName(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+
+  if (exactSecretHeaderNames.has(normalized)) {
+    return true;
+  }
+
+  const segments = normalized.split(/[^a-z0-9]+/).filter(Boolean);
+
+  if (segments.length === 0) {
+    return false;
+  }
+
+  return (
+    segments.includes("authorization") ||
+    segments.includes("cookie") ||
+    segments.includes("token") ||
+    segments.includes("secret") ||
+    segments.includes("apikey") ||
+    (segments.includes("api") && segments.includes("key")) ||
+    (segments.includes("auth") && segments.includes("key"))
+  );
+}
+
 function sanitizeHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
   if (!headers) {
     return undefined;
   }
 
   const sanitized = Object.fromEntries(
-    Object.entries(headers).filter(([key]) => key.toLowerCase() !== "authorization"),
+    Object.entries(headers).filter(([key]) => !isSecretLikeHeaderName(key)),
   );
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
