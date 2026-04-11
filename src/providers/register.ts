@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ProviderConfig } from "@mariozechner/pi-coding-agent";
 
-import type { ProviderAdapter } from "../adapters/types.js";
+import type { ProviderAdapter, ProviderFamilyId } from "../adapters/types.js";
 import {
   cloneLiveRegistryModels,
   getLiveProviderModels,
@@ -57,4 +57,35 @@ export async function registerTransparentBaseProvider(
     // Intentionally omit `models`: Pi keeps the live merged model list for base providers.
     streamSimple,
   });
+}
+
+export async function syncProviders(options: {
+  pi: Pick<ExtensionAPI, "registerProvider">;
+  modelRegistry: LiveModelRegistryReader;
+  adapters: Partial<Record<ProviderFamilyId, Pick<ProviderAdapter, "family" | "buildAliasOAuth">>>;
+  discoveredProviderNames: string[];
+  createStream: (family: ProviderFamilyId) => NonNullable<ProviderConfig["streamSimple"]>;
+}): Promise<void> {
+  const discoveredProviderNames = [...new Set(options.discoveredProviderNames)];
+
+  for (const adapter of Object.values(options.adapters)) {
+    if (!adapter) {
+      continue;
+    }
+
+    await registerTransparentBaseProvider(
+      options.pi,
+      options.modelRegistry,
+      adapter.family,
+      options.createStream(adapter.family),
+    );
+
+    for (const providerName of discoveredProviderNames) {
+      if (providerName === adapter.family || !providerName.startsWith(`${adapter.family}-`)) {
+        continue;
+      }
+
+      await registerAliasProvider(options.pi, options.modelRegistry, adapter, providerName);
+    }
+  }
 }
