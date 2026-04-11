@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
 import type { ProviderFamilyId } from "../adapters/types.js";
+import { FAMILY_DEFS } from "../providers/families.js";
 import { formatAccountRow, type FooterAccountEntry } from "../status/footer.js";
 
 export interface AccountRouterCommandHost {
@@ -16,6 +17,10 @@ export interface AccountRouterCommandHost {
 function splitArgs(args: string): string[] {
   const trimmed = args.trim();
   return trimmed.length === 0 ? [] : trimmed.split(/\s+/);
+}
+
+function isProviderFamilyId(value: string): value is ProviderFamilyId {
+  return value in FAMILY_DEFS;
 }
 
 export function registerAccountRouterCommand(
@@ -37,19 +42,39 @@ export function registerAccountRouterCommand(
         return;
       }
 
-      if (subcommand === "add" && value !== undefined) {
-        await host.addAccount(value as ProviderFamilyId, ctx);
+      if (subcommand === "add") {
+        if (value === undefined) {
+          ctx.ui.notify("Usage: /account-router add <family>", "error");
+          return;
+        }
+
+        if (!isProviderFamilyId(value)) {
+          ctx.ui.notify(`Unknown provider family: ${value}`, "error");
+          return;
+        }
+
+        await host.addAccount(value, ctx);
         return;
       }
 
-      if (subcommand === "use" && value !== undefined) {
+      if (subcommand === "use") {
+        if (value === undefined) {
+          ctx.ui.notify("Usage: /account-router use <provider-or-alias>", "error");
+          return;
+        }
+
         host.pinAccount(value);
         ctx.ui.notify(`Pinned ${value}`, "info");
         return;
       }
 
       if (subcommand === "unpin") {
-        host.unpin(value as ProviderFamilyId | undefined);
+        if (value !== undefined && !isProviderFamilyId(value)) {
+          ctx.ui.notify(`Unknown provider family: ${value}`, "error");
+          return;
+        }
+
+        host.unpin(value);
         ctx.ui.notify("Cleared manual pin", "info");
         return;
       }
@@ -57,6 +82,11 @@ export function registerAccountRouterCommand(
       if (subcommand === "refresh") {
         await host.refresh(ctx);
         ctx.ui.notify("Account router refreshed", "info");
+        return;
+      }
+
+      if (subcommand !== undefined) {
+        ctx.ui.notify(`Unknown subcommand: ${subcommand}`, "error");
         return;
       }
 

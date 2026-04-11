@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,6 +78,9 @@ describe("account-router settings store", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
     tempDirs.splice(0, tempDirs.length);
   });
 
@@ -154,6 +157,31 @@ describe("account-router command surface", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Pinned openai-codex-2", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Cleared manual pin", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Account router refreshed", "info");
+  });
+
+  it("reports invalid subcommands and missing/invalid family arguments instead of falling through", async () => {
+    const registerCommand = vi.fn();
+    const host = createHost();
+    const ctx = createContext();
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("add", ctx);
+    await command.handler("add not-a-family", ctx);
+    await command.handler("use", ctx);
+    await command.handler("unknown", ctx);
+
+    expect(host.addAccount).not.toHaveBeenCalled();
+    expect(host.pinAccount).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router add <family>", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown provider family: not-a-family", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router use <provider-or-alias>", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown subcommand: unknown", "error");
   });
 
   it("opens an interactive list when UI is available and pins the selected account row", async () => {
