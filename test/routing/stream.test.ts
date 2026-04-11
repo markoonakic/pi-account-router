@@ -116,7 +116,14 @@ describe("family router stream", () => {
           Authorization: "Bearer openai-codex-2",
           "x-auth-provider": "openai-codex-2",
         });
-        expect(options).toMatchObject({ apiKey: "token-for-openai-codex-2" });
+        expect(options).toMatchObject({
+          apiKey: "token-for-openai-codex-2",
+          headers: {
+            Authorization: "Bearer openai-codex-2",
+            "x-auth-provider": "openai-codex-2",
+            "x-client": "from-options",
+          },
+        });
 
         yield {
           type: "done",
@@ -130,7 +137,16 @@ describe("family router stream", () => {
     const stream = createFamilyRouterStream(store, "openai-codex", { "openai-codex": createCodexAdapter() }, getProvider);
 
     const events = [] as any[];
-    for await (const event of stream({ provider: "openai-codex", id: "gpt-5.4" } as any, { messages: [] } as any, {} as any)) {
+    for await (const event of stream(
+      { provider: "openai-codex", id: "gpt-5.4" } as any,
+      { messages: [] } as any,
+      {
+        headers: {
+          Authorization: "Bearer stale-token",
+          "x-client": "from-options",
+        },
+      } as any,
+    )) {
       events.push(event);
     }
 
@@ -144,6 +160,63 @@ describe("family router stream", () => {
       },
     ]);
     expect(store.getState().activeByFamily).toMatchObject({ "openai-codex": "openai-codex-2" });
+  });
+
+  it("skips providers that cannot resolve the requested model and falls back to the next eligible account", async () => {
+    const store = createRuntimeStore();
+    store.replaceAccounts([
+      { family: "openai-codex", providerName: "openai-codex", aliasIndex: 1, authenticated: true, authType: "oauth" },
+      { family: "openai-codex", providerName: "openai-codex-2", aliasIndex: 2, authenticated: true, authType: "oauth" },
+    ] as any);
+    store.setPinnedProvider("openai-codex", "openai-codex-2");
+
+    const find = vi.fn((provider: string, id: string) => {
+      if (provider === "openai-codex-2") {
+        return undefined;
+      }
+
+      return { ...createModel(provider), id };
+    });
+
+    store.bindModelRegistry({
+      find,
+      getApiKeyAndHeaders: async (model: any) => ({ ok: true, apiKey: `token-${model.provider}`, headers: {} }),
+    } as any);
+
+    const attempts: string[] = [];
+    const streamSimple = vi.fn((model: any) =>
+      (async function* () {
+        attempts.push(model.provider);
+        yield {
+          type: "done",
+          reason: "stop",
+          message: createMessage(model.provider),
+        } as any;
+      })(),
+    );
+
+    const stream = createFamilyRouterStream(
+      store,
+      "openai-codex",
+      { "openai-codex": createCodexAdapter() },
+      () => ({ streamSimple }) as any,
+    );
+
+    const events = [] as any[];
+    for await (const event of stream({ provider: "openai-codex", id: "gpt-5.4" } as any, { messages: [] } as any)) {
+      events.push(event);
+    }
+
+    expect(find).toHaveBeenCalledWith("openai-codex-2", "gpt-5.4");
+    expect(find).toHaveBeenCalledWith("openai-codex", "gpt-5.4");
+    expect(attempts).toEqual(["openai-codex"]);
+    expect(events).toMatchObject([
+      {
+        type: "done",
+        message: { provider: "openai-codex" },
+      },
+    ]);
+    expect(store.getState().activeByFamily).toMatchObject({ "openai-codex": "openai-codex" });
   });
 
   it("retries Codex before visible output, switches to the next alias, and finishes successfully", async () => {

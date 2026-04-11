@@ -95,7 +95,11 @@ export function createFamilyRouterStream(
 
       while (true) {
         const registry = store.getModelRegistry();
-        const selectedProvider = selectAccountForFamily(family, store.getAccounts(), store.getState());
+        const selectedProvider = selectAccountForFamily(
+          family,
+          store.getAccounts().filter((account) => !triedProviders.has(account.providerName)),
+          store.getState(),
+        );
 
         if (!selectedProvider || triedProviders.has(selectedProvider)) {
           stream.push(createUnavailableError(family, model));
@@ -106,8 +110,7 @@ export function createFamilyRouterStream(
 
         const actualModel = registry.find(selectedProvider, model.id);
         if (!actualModel) {
-          stream.push(createUnavailableError(family, model));
-          return;
+          continue;
         }
 
         const auth = await registry.getApiKeyAndHeaders(actualModel);
@@ -138,8 +141,8 @@ export function createFamilyRouterStream(
           ...(auth.headers || options?.headers
             ? {
                 headers: {
-                  ...(auth.headers ?? {}),
                   ...(options?.headers ?? {}),
+                  ...(auth.headers ?? {}),
                 },
               }
             : {}),
