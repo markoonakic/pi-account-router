@@ -27,13 +27,18 @@ export interface AccountSnapshot {
   badges: string[];
 }
 
+export interface ProviderAccount {
+  providerName: string;
+  auth?: unknown;
+}
+
 export interface AliasOAuthConfig {
   name: string;
   usesCallbackServer?: boolean;
-  login(callbacks: any): Promise<any>;
-  refreshToken(credentials: any): Promise<any>;
-  getApiKey(credentials: any): string;
-  modifyModels?(models: any[], credentials: any): any[];
+  login(callbacks: unknown): Promise<unknown>;
+  refreshToken(credentials: unknown): Promise<unknown>;
+  getApiKey(credentials: unknown): string;
+  modifyModels?(models: unknown[], credentials: unknown): unknown[];
 }
 
 export interface ProviderAdapter {
@@ -41,9 +46,6 @@ export interface ProviderAdapter {
   displayName: string;
   capabilities: AdapterCapabilities;
   buildAliasOAuth(index: number): AliasOAuthConfig;
-  createSnapshot?(
-    account: { providerName: string; auth?: any },
-    signal?: AbortSignal,
-  ): Promise<AccountSnapshot | undefined>;
+  createSnapshot?(account: ProviderAccount, signal?: AbortSignal): Promise<AccountSnapshot | undefined>;
   classifyRetry?(message: string): RetryDisposition;
 }

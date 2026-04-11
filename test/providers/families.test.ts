@@ -13,6 +13,7 @@ describe("provider family metadata", () => {
     expect(getFamilyForProviderName("openai-codex")).toBe("openai-codex");
     expect(getFamilyForProviderName("openai-codex-3")).toBe("openai-codex");
     expect(getFamilyForProviderName("anthropic-2")).toBe("anthropic");
+    expect(getFamilyForProviderName("openai-codex-foo")).toBeUndefined();
     expect(getFamilyForProviderName("openai")).toBeUndefined();
   });
 
@@ -36,5 +37,16 @@ describe("provider family metadata", () => {
 
   it("sorts base providers before aliases", () => {
     expect(getProviderSortKey("openai-codex")).toBeLessThan(getProviderSortKey("openai-codex-2"));
+  });
+
+  it("sorts providers deterministically across families and aliases", () => {
+    const providerNames = ["openai-codex-2", "anthropic", "openai-codex", "anthropic-2"];
+
+    expect([...providerNames].sort((left, right) => getProviderSortKey(left) - getProviderSortKey(right))).toEqual([
+      "anthropic",
+      "anthropic-2",
+      "openai-codex",
+      "openai-codex-2",
+    ]);
   });
 });

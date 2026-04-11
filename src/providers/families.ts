@@ -64,6 +64,9 @@ export const FAMILY_DEFS: Record<ProviderFamilyId, FamilyDefinition> = {
   },
 };
 
+const FAMILY_IDS = Object.keys(FAMILY_DEFS) as ProviderFamilyId[];
+const SORTED_FAMILY_IDS = [...FAMILY_IDS].sort((left, right) => left.localeCompare(right));
+
 function isAliasForFamily(providerName: string, family: ProviderFamilyId): boolean {
   if (providerName === family) {
     return true;
@@ -78,7 +81,7 @@ function isAliasForFamily(providerName: string, family: ProviderFamilyId): boole
 }
 
 export function getFamilyForProviderName(providerName: string): ProviderFamilyId | undefined {
-  for (const family of Object.keys(FAMILY_DEFS) as ProviderFamilyId[]) {
+  for (const family of FAMILY_IDS) {
     if (isAliasForFamily(providerName, family)) {
       return family;
     }
@@ -108,5 +111,9 @@ export function getNextAliasProviderName(family: ProviderFamilyId, existingProvi
 }
 
 export function getProviderSortKey(providerName: string): number {
-  return getAliasIndex(providerName);
+  const family = getFamilyForProviderName(providerName);
+  const familySortIndex = family === undefined ? SORTED_FAMILY_IDS.length : SORTED_FAMILY_IDS.indexOf(family);
+  const aliasIndex = getAliasIndex(providerName);
+
+  return familySortIndex + aliasIndex / (aliasIndex + 1);
 }
