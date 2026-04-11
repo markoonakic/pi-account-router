@@ -6,8 +6,9 @@ import installExtension from "../src/index.js";
 describe("pi-account-router bootstrap", () => {
   it("registers the top-level account-router command with an account routing description", () => {
     const registerCommand = vi.fn();
+    const on = vi.fn();
 
-    installExtension({ registerCommand } as unknown as ExtensionAPI);
+    installExtension({ registerCommand, on } as unknown as ExtensionAPI);
 
     expect(registerCommand).toHaveBeenCalledTimes(1);
     expect(registerCommand).toHaveBeenCalledWith(
@@ -21,9 +22,10 @@ describe("pi-account-router bootstrap", () => {
 
   it("wires the account-router command surface through installAccountRouter", async () => {
     const registerCommand = vi.fn();
+    const on = vi.fn();
     const notify = vi.fn();
 
-    installExtension({ registerCommand } as unknown as ExtensionAPI);
+    installExtension({ registerCommand, on } as unknown as ExtensionAPI);
 
     const [, command] = registerCommand.mock.calls[0] as [
       string,
@@ -35,14 +37,15 @@ describe("pi-account-router bootstrap", () => {
       ui: { notify },
     } as unknown as ExtensionCommandContext);
 
-    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/scaffold loaded/i), "info");
+    expect(notify).toHaveBeenCalledWith("No routed accounts discovered", "info");
   });
 
   it("uses the shared command fallback when no UI is available", async () => {
     const registerCommand = vi.fn();
+    const on = vi.fn();
     const notify = vi.fn();
 
-    installExtension({ registerCommand } as unknown as ExtensionAPI);
+    installExtension({ registerCommand, on } as unknown as ExtensionAPI);
 
     const [, command] = registerCommand.mock.calls[0] as [
       string,
@@ -50,8 +53,19 @@ describe("pi-account-router bootstrap", () => {
     ];
 
     await command.handler("", {
+      cwd: process.cwd(),
       hasUI: false,
-      ui: { notify },
+      modelRegistry: {
+        authStorage: {
+          getAll: () => ({}),
+          get: () => undefined,
+        },
+        refresh: vi.fn(),
+        getAll: () => [],
+        find: vi.fn(),
+        getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
+      },
+      ui: { notify, setStatus: vi.fn() },
     } as unknown as ExtensionCommandContext);
 
     expect(notify).toHaveBeenCalledWith("No routed accounts discovered", "info");

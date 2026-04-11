@@ -5,13 +5,13 @@ export interface FooterAccountEntry {
   pinned: boolean;
   exhausted: boolean;
   needsReauth: boolean;
-  summary?: string;
+  summary: string | undefined;
   badges: string[];
 }
 
 export interface FooterSummaryEntry {
   providerName: string;
-  summary?: string;
+  summary: string | undefined;
   exhausted: boolean;
   needsReauth: boolean;
 }

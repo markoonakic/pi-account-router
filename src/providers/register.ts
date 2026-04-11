@@ -73,6 +73,10 @@ export async function syncProviders(options: {
       continue;
     }
 
+    if (getLiveProviderModels(options.modelRegistry, adapter.family).length === 0) {
+      continue;
+    }
+
     await registerTransparentBaseProvider(
       options.pi,
       options.modelRegistry,
