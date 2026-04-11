@@ -1,0 +1,39 @@
+{
+  "name": "pi-account-router",
+  "version": "0.1.0",
+  "description": "Pi extension package for routing across authenticated subscription accounts.",
+  "type": "module",
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run test && npm run typecheck",
+    "pack:dry": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "^0.66.1",
+    "@mariozechner/pi-coding-agent": "^0.66.1",
+    "@mariozechner/pi-tui": "^0.66.1",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.4"
+  }
+}
