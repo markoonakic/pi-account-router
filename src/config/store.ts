@@ -18,8 +18,9 @@ function normalizeAccountRouterSettings(value: unknown): AccountRouterSettings {
     return { ...DEFAULT_ACCOUNT_ROUTER_SETTINGS };
   }
 
-  const showFooter = "showFooter" in value && typeof value.showFooter === "boolean"
-    ? value.showFooter
+  const settings = value as { showFooter?: unknown };
+  const showFooter = Object.hasOwn(settings, "showFooter") && typeof settings.showFooter === "boolean"
+    ? settings.showFooter
     : DEFAULT_ACCOUNT_ROUTER_SETTINGS.showFooter;
 
   return { showFooter };

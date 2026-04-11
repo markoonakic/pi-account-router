@@ -20,7 +20,7 @@ function splitArgs(args: string): string[] {
 }
 
 function isProviderFamilyId(value: string): value is ProviderFamilyId {
-  return value in FAMILY_DEFS;
+  return Object.hasOwn(FAMILY_DEFS, value);
 }
 
 export function registerAccountRouterCommand(

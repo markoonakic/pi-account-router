@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -102,6 +102,24 @@ describe("account-router settings store", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ showFooter: false });
     expect(loadAccountRouterSettings(cwd)).toEqual({ showFooter: false });
   });
+
+  it("ignores inherited showFooter values from parsed objects", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-account-router-settings-"));
+    tempDirs.push(cwd);
+
+    const path = join(cwd, ".pi", "account-router.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{}\n", "utf8");
+
+    const parsed = Object.create({ showFooter: false }) as { showFooter?: boolean };
+    const parseSpy = vi.spyOn(JSON, "parse").mockReturnValue(parsed);
+
+    try {
+      expect(loadAccountRouterSettings(cwd)).toEqual({ showFooter: true });
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
 });
 
 describe("account-router command surface", () => {
@@ -173,6 +191,7 @@ describe("account-router command surface", () => {
 
     await command.handler("add", ctx);
     await command.handler("add not-a-family", ctx);
+    await command.handler("add toString", ctx);
     await command.handler("use", ctx);
     await command.handler("unknown", ctx);
 
@@ -180,6 +199,7 @@ describe("account-router command surface", () => {
     expect(host.pinAccount).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router add <family>", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown provider family: not-a-family", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown provider family: toString", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router use <provider-or-alias>", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown subcommand: unknown", "error");
   });
