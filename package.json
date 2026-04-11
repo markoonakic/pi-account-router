@@ -7,11 +7,21 @@
     "src"
   ],
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-extension",
+    "account-router"
   ],
   "engines": {
     "node": ">=20.6.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markoonakic/pi-account-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/markoonakic/pi-account-router/issues"
+  },
+  "homepage": "https://github.com/markoonakic/pi-account-router#readme",
   "pi": {
     "extensions": [
       "./src/index.ts"
