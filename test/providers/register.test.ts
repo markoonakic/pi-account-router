@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderAdapter } from "../../src/adapters/types.js";
 import { cloneLiveRegistryModels, toProviderModelConfigs } from "../../src/models/live-registry.js";
-import { registerAliasProvider, registerTransparentBaseProvider } from "../../src/providers/register.js";
+import { registerAliasProvider, registerTransparentBaseProvider, syncProviders } from "../../src/providers/register.js";
 
 function createRegistryWithCodexOverride() {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-account-router-"));
@@ -213,6 +213,58 @@ describe("provider registration from the live model registry", () => {
           "x-live-override": "true",
         },
       });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("syncProviders ignores invalid alias-like names and only registers real family aliases", async () => {
+    const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
+    const registerProvider = vi.fn();
+    const adapter: ProviderAdapter = {
+      family: "openai-codex",
+      displayName: "ChatGPT Plus/Pro (Codex)",
+      capabilities: {
+        usage: true,
+        silentFailover: true,
+        nativeLogin: true,
+        reauth: true,
+        experimental: false,
+      },
+      buildAliasOAuth: vi.fn((index: number) => ({
+        name: `ChatGPT Codex #${index}`,
+        async login() {
+          return { access: "a", refresh: "r", expires: Date.now() + 60_000 };
+        },
+        async refreshToken(credentials: unknown) {
+          return credentials;
+        },
+        getApiKey() {
+          return "token";
+        },
+      })),
+    };
+
+    try {
+      await syncProviders({
+        pi: { registerProvider } as Pick<ExtensionAPI, "registerProvider">,
+        modelRegistry,
+        adapters: { "openai-codex": adapter },
+        discoveredProviderNames: ["openai-codex", "openai-codex-2", "openai-codex-foo"],
+        createStream: () => vi.fn() as never,
+      });
+
+      expect(registerProvider).toHaveBeenCalledTimes(2);
+      expect(registerProvider).toHaveBeenNthCalledWith(
+        1,
+        "openai-codex",
+        expect.objectContaining({ streamSimple: expect.any(Function) }),
+      );
+      expect(registerProvider).toHaveBeenNthCalledWith(
+        2,
+        "openai-codex-2",
+        expect.objectContaining({ models: expect.any(Array) }),
+      );
     } finally {
       cleanup();
     }

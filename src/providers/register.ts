@@ -7,7 +7,7 @@ import {
   toProviderModelConfigs,
   type LiveModelRegistryReader,
 } from "../models/live-registry.js";
-import { getAliasIndex } from "./families.js";
+import { getAliasIndex, getFamilyForProviderName } from "./families.js";
 
 function getRequiredProviderConfigSource(
   modelRegistry: Pick<LiveModelRegistryReader, "getAll">,
@@ -85,7 +85,12 @@ export async function syncProviders(options: {
     );
 
     for (const providerName of discoveredProviderNames) {
-      if (providerName === adapter.family || !providerName.startsWith(`${adapter.family}-`)) {
+      if (providerName === adapter.family) {
+        continue;
+      }
+
+      const discoveredFamily = getFamilyForProviderName(providerName);
+      if (discoveredFamily !== adapter.family || getAliasIndex(providerName) <= 1) {
         continue;
       }
 
