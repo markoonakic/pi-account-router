@@ -10,6 +10,7 @@ export interface AccountRouterCommandHost {
   pinAccount(providerName: string): void;
   unpin(family?: ProviderFamilyId): void;
   refresh(ctx: ExtensionCommandContext): Promise<void>;
+  importMulticodex(ctx: ExtensionCommandContext, dryRun: boolean): Promise<string>;
   statusText(): string;
   debugText(): string;
 }
@@ -82,6 +83,19 @@ export function registerAccountRouterCommand(
       if (subcommand === "refresh") {
         await host.refresh(ctx);
         ctx.ui.notify("Account router refreshed", "info");
+        return;
+      }
+
+      if (subcommand === "import") {
+        if (value !== "multicodex") {
+          ctx.ui.notify("Usage: /account-router import multicodex [dry-run]", "error");
+          return;
+        }
+
+        const tokens = splitArgs(args);
+        const dryRun = tokens[2] === "dry-run";
+        const result = await host.importMulticodex(ctx, dryRun);
+        ctx.ui.notify(result, dryRun ? "info" : "warning");
         return;
       }
 

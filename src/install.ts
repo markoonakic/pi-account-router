@@ -4,6 +4,7 @@ import { buildAccountCatalog, type AccountCatalogEntry } from "./accounts/catalo
 import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
 import { discoverAccounts } from "./auth/discovery.js";
+import { importMulticodexAccounts, previewMulticodexImport } from "./auth/import-multicodex.js";
 import { addAccountAndLogin } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
 import { loadAccountRouterSettings } from "./config/store.js";
@@ -184,6 +185,34 @@ export function installAccountRouter(
     },
     async refresh(ctx: ExtensionCommandContext) {
       await refreshFromContext(ctx);
+    },
+    async importMulticodex(ctx: ExtensionCommandContext, dryRun: boolean) {
+      if (dryRun) {
+        const preview = previewMulticodexImport();
+        const rows = preview.rows.map((row) => {
+          const active = row.isActiveSource ? " (active source)" : "";
+          const accountId = row.accountId ? ` accountId=${row.accountId}` : "";
+          return `${row.providerName} <- ${row.email}${active}${accountId}`;
+        });
+
+        return [`Would import ${preview.accountCount} multicodex account(s):`, ...rows].join("\n");
+      }
+
+      const result = importMulticodexAccounts(ctx.modelRegistry.authStorage);
+      ctx.modelRegistry.refresh();
+      await refreshFromContext(ctx);
+
+      const rows = result.rows.map((row) => {
+        const active = row.isActiveSource ? " (active source)" : "";
+        const accountId = row.accountId ? ` accountId=${row.accountId}` : "";
+        return `${row.providerName} <- ${row.email}${active}${accountId}`;
+      });
+
+      return [
+        `Imported ${result.accountCount} multicodex account(s).`,
+        `Backup: ${result.backupPath}`,
+        ...rows,
+      ].join("\n");
     },
     statusText() {
       return getStatusText();

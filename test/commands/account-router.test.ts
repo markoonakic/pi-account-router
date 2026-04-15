@@ -16,6 +16,7 @@ function createHost(overrides: Partial<AccountRouterCommandHost> = {}): AccountR
     pinAccount: vi.fn(),
     unpin: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
+    importMulticodex: vi.fn().mockResolvedValue("import ok"),
     statusText: vi.fn().mockReturnValue("status ok"),
     debugText: vi.fn().mockReturnValue("debug ok"),
     ...overrides,
@@ -149,7 +150,7 @@ describe("account-router command surface", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("status ok", "info");
   });
 
-  it("supports debug, add, use, unpin, and refresh subcommands", async () => {
+  it("supports debug, add, use, unpin, refresh, and multicodex import subcommands", async () => {
     const registerCommand = vi.fn();
     const host = createHost();
 
@@ -166,15 +167,21 @@ describe("account-router command surface", () => {
     await command.handler("use openai-codex-2", ctx);
     await command.handler("unpin openai-codex", ctx);
     await command.handler("refresh", ctx);
+    await command.handler("import multicodex dry-run", ctx);
+    await command.handler("import multicodex", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith("debug ok", "info");
     expect(host.addAccount).toHaveBeenCalledWith("openai-codex", ctx);
     expect(host.pinAccount).toHaveBeenCalledWith("openai-codex-2");
     expect(host.unpin).toHaveBeenCalledWith("openai-codex");
     expect(host.refresh).toHaveBeenCalledWith(ctx);
+    expect(host.importMulticodex).toHaveBeenNthCalledWith(1, ctx, true);
+    expect(host.importMulticodex).toHaveBeenNthCalledWith(2, ctx, false);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Pinned openai-codex-2", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Cleared manual pin", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Account router refreshed", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("import ok", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("import ok", "warning");
   });
 
   it("reports invalid subcommands and missing/invalid family arguments instead of falling through", async () => {
@@ -193,6 +200,8 @@ describe("account-router command surface", () => {
     await command.handler("add not-a-family", ctx);
     await command.handler("add toString", ctx);
     await command.handler("use", ctx);
+    await command.handler("import", ctx);
+    await command.handler("import not-multicodex", ctx);
     await command.handler("unknown", ctx);
 
     expect(host.addAccount).not.toHaveBeenCalled();
@@ -201,6 +210,7 @@ describe("account-router command surface", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown provider family: not-a-family", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown provider family: toString", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router use <provider-or-alias>", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /account-router import multicodex [dry-run]", "error");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown subcommand: unknown", "error");
   });
 
