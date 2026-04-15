@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@m
 import { buildAccountCatalog, type AccountCatalogEntry } from "./accounts/catalog.js";
 import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
+import { getApiProvider, type Api } from "@mariozechner/pi-ai";
 import { discoverAccounts } from "./auth/discovery.js";
 import { importMulticodexAccounts, previewMulticodexImport } from "./auth/import-multicodex.js";
 import { addAccountAndLogin } from "./auth/login.js";
@@ -136,12 +137,21 @@ export function installAccountRouter(
     snapshots = await buildSnapshots(ctx);
     refreshActiveSelections();
 
+    const originalApiProviders = new Map<Api, ReturnType<typeof getApiProvider> | undefined>();
+    for (const family of Object.keys(ADAPTERS) as ProviderFamilyId[]) {
+      const model = ctx.modelRegistry.getAll().find((candidate) => candidate.provider === family);
+      if (model && !originalApiProviders.has(model.api)) {
+        originalApiProviders.set(model.api, getApiProvider(model.api));
+      }
+    }
+    const getOriginalApiProvider = (api: Api) => originalApiProviders.get(api);
+
     await syncProviders({
       pi,
       modelRegistry: ctx.modelRegistry,
       adapters: ADAPTERS,
       discoveredProviderNames: store.getAccounts().map((account) => account.providerName),
-      createStream: (family) => createFamilyRouterStream(store, family, ADAPTERS),
+      createStream: (family) => createFamilyRouterStream(store, family, ADAPTERS, undefined, getOriginalApiProvider),
     });
 
     const catalog = buildCatalog();

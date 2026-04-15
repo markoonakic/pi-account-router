@@ -351,6 +351,56 @@ describe("family router stream", () => {
     });
   });
 
+  it("uses the provided fallback API provider when the base provider has been transparently overridden", async () => {
+    const store = createRuntimeStore();
+    store.replaceAccounts([
+      { family: "openai-codex", providerName: "openai-codex", aliasIndex: 1, authenticated: true, authType: "oauth" },
+    ] as any);
+    store.bindModelRegistry({
+      find: (provider: string, id: string) => ({ ...createModel(provider), id }),
+      getApiKeyAndHeaders: async (model: any) => ({ ok: true, apiKey: `token-${model.provider}`, headers: {} }),
+    } as any);
+
+    const recursiveProvider = {
+      streamSimple: vi.fn(() => {
+        throw new Error("recursive provider should not be used");
+      }),
+    } as any;
+    const fallbackProvider = {
+      streamSimple: vi.fn((model: any) =>
+        (async function* () {
+          yield {
+            type: "done",
+            reason: "stop",
+            message: createMessage(model.provider),
+          } as any;
+        })(),
+      ),
+    } as any;
+
+    const stream = createFamilyRouterStream(
+      store,
+      "openai-codex",
+      { "openai-codex": createCodexAdapter() },
+      () => recursiveProvider,
+      () => fallbackProvider,
+    );
+
+    const events = [] as any[];
+    for await (const event of stream({ provider: "openai-codex", id: "gpt-5.4" } as any, { messages: [] } as any)) {
+      events.push(event);
+    }
+
+    expect(recursiveProvider.streamSimple).not.toHaveBeenCalled();
+    expect(fallbackProvider.streamSimple).toHaveBeenCalledTimes(1);
+    expect(events).toMatchObject([
+      {
+        type: "done",
+        message: { provider: "openai-codex" },
+      },
+    ]);
+  });
+
   it("syncs transparent base providers and discovered alias providers for each family", async () => {
     const registerProvider = vi.fn();
     const openaiBaseStream = vi.fn();

@@ -9,6 +9,10 @@ import {
   type SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
 
+interface ApiProviderLike {
+  streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
+}
+
 import type { ProviderAdapter, ProviderFamilyId } from "../adapters/types.js";
 import type { RuntimeStore } from "../runtime/store.js";
 import { applyRetryFailure } from "./failover.js";
@@ -85,6 +89,7 @@ export function createFamilyRouterStream(
   family: ProviderFamilyId,
   adapters: Partial<Record<ProviderFamilyId, ProviderAdapter>>,
   getProvider: typeof getApiProvider = getApiProvider,
+  getFallbackApiProvider?: (api: Api) => ApiProviderLike | undefined,
 ): (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream {
   return (model, context, options) => {
     const stream = createAssistantMessageEventStream();
@@ -119,7 +124,7 @@ export function createFamilyRouterStream(
           continue;
         }
 
-        const apiProvider = getProvider(actualModel.api);
+        const apiProvider = getFallbackApiProvider?.(actualModel.api) ?? getProvider(actualModel.api);
         if (!apiProvider?.streamSimple) {
           throw new Error(`Missing stream provider for api ${actualModel.api}`);
         }
