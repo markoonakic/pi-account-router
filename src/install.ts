@@ -287,6 +287,11 @@ export function installAccountRouter(
 
       if (action === "remove") {
         await removeAccount(providerName, ctx);
+        return;
+      }
+
+      if (action === "show-provider-key") {
+        ctx.ui.notify(providerName, "info");
       }
     },
     async removeAccount(providerName: string, ctx: ExtensionCommandContext) {

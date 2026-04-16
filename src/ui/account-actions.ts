@@ -1,5 +1,7 @@
 import type { ExtensionUIContext } from "@mariozechner/pi-coding-agent";
 
+import type { ProviderFamilyId } from "../adapters/types.js";
+
 export interface AccountRenamePromptInput {
   providerName: string;
   currentLabel?: string | undefined;
@@ -17,9 +19,14 @@ export interface AccountRemovalConfirmInput {
   displayName: string;
 }
 
-export type AccountDetailsAction = "reauth" | "remove" | undefined;
+export interface AddAccountFamilyOption {
+  family: ProviderFamilyId;
+  displayName: string;
+}
 
-const ACCOUNT_DETAILS_OPTIONS = ["Reauthenticate", "Remove account", "Close"] as const;
+export type AccountDetailsAction = "reauth" | "remove" | "show-provider-key" | undefined;
+
+const ACCOUNT_DETAILS_OPTIONS = ["Reauthenticate", "Remove account", "Show provider key"] as const;
 
 function normalizeLabel(value: string | undefined): string | undefined {
   if (value === undefined) {
@@ -53,7 +60,7 @@ export async function showAccountDetailsMenu(
   input: AccountDetailsMenuInput,
 ): Promise<AccountDetailsAction> {
   const title = firstNonEmpty(
-    input.displayName,
+    `${input.displayName} · esc back`,
     `Provider key: ${input.providerName}`,
     input.summary,
     ...(input.details ?? []),
@@ -68,7 +75,24 @@ export async function showAccountDetailsMenu(
     return "remove";
   }
 
+  if (selection === "Show provider key") {
+    return "show-provider-key";
+  }
+
   return undefined;
+}
+
+export async function showAddAccountFamilyPicker(
+  ui: Pick<ExtensionUIContext, "select">,
+  families: readonly AddAccountFamilyOption[],
+): Promise<ProviderFamilyId | undefined> {
+  const labels = families.map((family) => family.displayName);
+  const selection = await ui.select("Add account · esc back", labels);
+  if (selection === undefined) {
+    return undefined;
+  }
+
+  return families.find((family) => family.displayName === selection)?.family;
 }
 
 export async function confirmAccountRemoval(

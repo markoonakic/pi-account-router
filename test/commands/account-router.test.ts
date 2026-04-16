@@ -254,6 +254,88 @@ describe("account-router command surface", () => {
     expect(narrowLines).not.toEqual(wideLines);
   });
 
+  it("opens a family picker when add is requested from the custom panel", async () => {
+    const registerCommand = vi.fn();
+    const account = {
+      providerName: "openai-codex-2",
+      displayName: "ChatGPT Codex #2",
+      providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+      active: false,
+      pinned: false,
+      exhausted: false,
+      needsReauth: false,
+      summary: "5h 80% | 7d 65%",
+      badges: ["usage"],
+    };
+    const host = createHost({
+      listAccounts: vi.fn().mockResolvedValue([account]),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue("ChatGPT Plus/Pro (Codex)"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "add" })
+          .mockResolvedValueOnce(undefined),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      "Add account · esc back",
+      expect.arrayContaining(["ChatGPT Plus/Pro (Codex)", "Anthropic (Claude Pro/Max)"]),
+    );
+    expect(host.addAccount).toHaveBeenCalledWith("openai-codex", ctx);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats add-family picker cancellation as back and returns to the root panel", async () => {
+    const registerCommand = vi.fn();
+    const account = {
+      providerName: "openai-codex-2",
+      displayName: "ChatGPT Codex #2",
+      providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+      active: false,
+      pinned: false,
+      exhausted: false,
+      needsReauth: false,
+      summary: "5h 80% | 7d 65%",
+      badges: ["usage"],
+    };
+    const listAccounts = vi.fn().mockResolvedValue([account]);
+    const host = createHost({ listAccounts });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue(undefined),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "add" })
+          .mockResolvedValueOnce(undefined),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(host.addAccount).not.toHaveBeenCalled();
+    expect(listAccounts).toHaveBeenCalledTimes(2);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+  });
+
   it("reloads the custom panel from listAccounts when refresh is requested", async () => {
     const registerCommand = vi.fn();
     const account = {

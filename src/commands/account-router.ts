@@ -6,6 +6,7 @@ import { FAMILY_DEFS, getFamilyForProviderName } from "../providers/families.js"
 import { formatAccountRow, type FooterAccountEntry } from "../status/footer.js";
 import { formatFamilySectionHeader, formatSecondaryGhostLine, resolvePrimaryAccountName } from "../ui/account-display.js";
 import { buildAccountPanelShell, type AccountPanelShellModel } from "../ui/account-panel.js";
+import { showAddAccountFamilyPicker } from "../ui/account-actions.js";
 
 export interface AccountRouterCommandHost {
   listAccounts(ctx: ExtensionCommandContext): Promise<FooterAccountEntry[]>;
@@ -297,7 +298,19 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
     }
 
     if (action.action === "add") {
-      ctx.ui.notify("Use /account-router add <family> to add an account.", "info");
+      const family = await showAddAccountFamilyPicker(
+        ctx.ui,
+        (Object.keys(FAMILY_DEFS) as ProviderFamilyId[]).map((familyId) => ({
+          family: familyId,
+          displayName: FAMILY_DEFS[familyId].displayName,
+        })),
+      );
+
+      if (family !== undefined) {
+        await host.addAccount(family, ctx);
+      }
+
+      accounts = await host.listAccounts(ctx);
       continue;
     }
 

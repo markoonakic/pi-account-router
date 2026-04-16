@@ -398,8 +398,8 @@ describe("installAccountRouter", () => {
     await command.handler("", interactiveCtx);
 
     expect(interactiveCtx.ui.select).toHaveBeenCalledWith(
-      expect.stringContaining("openai-codex-2"),
-      expect.arrayContaining(["Reauthenticate", "Remove account", "Close"]),
+      expect.stringContaining("esc back"),
+      expect.arrayContaining(["Reauthenticate", "Remove account", "Show provider key"]),
     );
     expect(authStorage.login).toHaveBeenCalledWith(
       "openai-codex-2",
