@@ -51,6 +51,25 @@ describe("codex adapter", () => {
     });
   });
 
+  it("captures codex account identity from usage payloads and carries it into the snapshot", () => {
+    const parsed = parseCodexUsage({
+      plan_type: "chatgpt-pro",
+      email: "person@example.com",
+      rate_limit: {
+        primary_window: { used_percent: 35, limit_window_seconds: 604_800, reset_at: 2_000_604_800 },
+        secondary_window: { used_percent: 20, limit_window_seconds: 18_000, reset_at: 2_000_000_000 },
+      },
+    } as any);
+
+    expect(parsed).toMatchObject({
+      identity: "person@example.com",
+    });
+    expect(buildCodexAccountSnapshot(parsed)).toMatchObject({
+      identity: "person@example.com",
+      summary: "chatgpt-pro | 5h 80% | 7d 65%",
+    });
+  });
+
   it("classifies quota, auth, and other failures", () => {
     expect(classifyCodexRetry("429 rate limit exceeded")).toMatchObject({
       action: "retry",

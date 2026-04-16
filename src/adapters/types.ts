@@ -25,6 +25,7 @@ export interface AccountSnapshot {
   details: string[];
   score: number;
   badges: string[];
+  identity?: string;
 }
 
 export interface ProviderAccount {

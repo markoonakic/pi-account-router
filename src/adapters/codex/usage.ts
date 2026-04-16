@@ -20,6 +20,13 @@ interface CodexRateLimit {
 interface CodexUsageResponse {
   plan_type?: unknown;
   rate_limit?: CodexRateLimit;
+  email?: unknown;
+  account?: {
+    email?: unknown;
+  };
+  user?: {
+    email?: unknown;
+  };
 }
 
 export interface ParsedCodexUsage {
@@ -28,6 +35,7 @@ export interface ParsedCodexUsage {
   weeklyLeft?: number;
   resetAtFiveHour?: number;
   resetAtWeekly?: number;
+  identity?: string;
 }
 
 interface CodexAuthLike {
@@ -56,6 +64,16 @@ function normalizeResetAt(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeIdentity(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function getCodexIdentity(data: CodexUsageResponse | undefined): string | undefined {
+  return normalizeIdentity(data?.email)
+    ?? normalizeIdentity(data?.account?.email)
+    ?? normalizeIdentity(data?.user?.email);
+}
+
 export function parseCodexUsage(data: CodexUsageResponse | undefined): ParsedCodexUsage {
   const fiveHourWindow = findWindow(data?.rate_limit, FIVE_HOURS);
   const weeklyWindow = findWindow(data?.rate_limit, SEVEN_DAYS);
@@ -64,12 +82,15 @@ export function parseCodexUsage(data: CodexUsageResponse | undefined): ParsedCod
   const resetAtFiveHour = normalizeResetAt(fiveHourWindow?.reset_at);
   const resetAtWeekly = normalizeResetAt(weeklyWindow?.reset_at);
 
+  const identity = getCodexIdentity(data);
+
   return {
     planType: typeof data?.plan_type === "string" ? data.plan_type : "unknown",
     ...(fiveHourLeft === undefined ? {} : { fiveHourLeft }),
     ...(weeklyLeft === undefined ? {} : { weeklyLeft }),
     ...(resetAtFiveHour === undefined ? {} : { resetAtFiveHour }),
     ...(resetAtWeekly === undefined ? {} : { resetAtWeekly }),
+    ...(identity === undefined ? {} : { identity }),
   };
 }
 
@@ -94,6 +115,7 @@ export function buildCodexAccountSnapshot(parsed: ParsedCodexUsage): AccountSnap
     details,
     score: (parsed.fiveHourLeft ?? 0) + (parsed.weeklyLeft ?? 0),
     badges: [...CODEX_BADGES],
+    ...(parsed.identity === undefined ? {} : { identity: parsed.identity }),
   };
 }
 
