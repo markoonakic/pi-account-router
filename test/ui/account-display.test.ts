@@ -60,9 +60,9 @@ describe("account display helpers", () => {
       accountDisplay.formatSecondaryGhostLine({
         providerName: "openai-codex-2",
         providerDisplayName: "ChatGPT Plus/Pro (Codex)",
-        summary: "5h 80% | 7d 65%",
+        summary: "5h left 80% | 7d left 65%",
       }),
-    ).toBe("ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
+    ).toBe("ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
 
     expect(
       accountDisplay.formatSecondaryGhostLine({

@@ -106,8 +106,8 @@ function createEmptyCodexSnapshot(): AccountSnapshot {
 export function buildCodexAccountSnapshot(parsed: ParsedCodexUsage): AccountSnapshot {
   const details = [
     parsed.planType !== "unknown" ? parsed.planType : undefined,
-    parsed.fiveHourLeft !== undefined ? `5h ${parsed.fiveHourLeft}%` : undefined,
-    parsed.weeklyLeft !== undefined ? `7d ${parsed.weeklyLeft}%` : undefined,
+    parsed.fiveHourLeft !== undefined ? `5h left ${parsed.fiveHourLeft}%` : undefined,
+    parsed.weeklyLeft !== undefined ? `7d left ${parsed.weeklyLeft}%` : undefined,
   ].filter((value): value is string => value !== undefined);
 
   return {

@@ -231,7 +231,7 @@ describe("installAccountRouter", () => {
     await command.handler("", textCtx);
 
     const laterRenderedText = (textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    expect(laterRenderedText).toContain("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
+    expect(laterRenderedText).toContain("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
     expect(laterRenderedText).not.toContain("openai-codex-2");
     expect(laterRenderedText).not.toContain("[usage]");
     expect(textCtx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
@@ -281,7 +281,7 @@ describe("installAccountRouter", () => {
 
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "account-router",
-      "Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%",
+      "Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%",
     );
   });
 
@@ -362,7 +362,7 @@ describe("installAccountRouter", () => {
 
     expect(lines).toContain("ChatGPT Plus/Pro (Codex) · 2 accounts · 1 active");
     expect(lines).toContain("› Work Pro Codex");
-    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
+    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
   });
 
   it("dispatches reauth from the account details menu", async () => {

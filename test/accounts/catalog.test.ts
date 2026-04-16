@@ -38,14 +38,14 @@ describe("buildAccountCatalog", () => {
       },
       {
         "openai-codex-2": {
-          summary: "5h 80% | 7d 65%",
+          summary: "5h left 80% | 7d left 65%",
           details: [],
           score: 145,
           badges: ["usage"],
           identity: "work@example.com",
         },
         "openai-codex-3": {
-          summary: "5h 55% | 7d 42%",
+          summary: "5h left 55% | 7d left 42%",
           details: [],
           score: 97,
           badges: ["usage"],
@@ -69,7 +69,7 @@ describe("buildAccountCatalog", () => {
       identity: "work@example.com",
       providerDisplayName: "ChatGPT Plus/Pro (Codex)",
       displayName: "Work Pro Codex",
-      secondaryText: "ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%",
+      secondaryText: "ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%",
     });
 
     expect(entries[1]).toMatchObject({
@@ -77,7 +77,7 @@ describe("buildAccountCatalog", () => {
       identity: "person@example.com",
       providerDisplayName: "ChatGPT Plus/Pro (Codex)",
       displayName: "person@example.com",
-      secondaryText: "ChatGPT Plus/Pro (Codex) · 5h 55% | 7d 42%",
+      secondaryText: "ChatGPT Plus/Pro (Codex) · 5h left 55% | 7d left 42%",
     });
     expect(entries[1]).not.toHaveProperty("label");
 

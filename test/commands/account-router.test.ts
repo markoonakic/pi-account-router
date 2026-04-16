@@ -47,10 +47,10 @@ describe("account-router status rendering", () => {
         pinned: true,
         exhausted: false,
         needsReauth: false,
-        summary: "5h 80% | 7d 65%",
+        summary: "5h left 80% | 7d left 65%",
         badges: ["usage", "silent failover"],
       }),
-    ).toBe("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65% — active pinned");
+    ).toBe("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65% — active pinned");
   });
 
   it("renders a compact footer with the human-first name instead of the raw provider key", () => {
@@ -59,11 +59,11 @@ describe("account-router status rendering", () => {
         providerName: "openai-codex-2",
         providerDisplayName: "ChatGPT Plus/Pro (Codex)",
         displayName: "Work Pro Codex",
-        summary: "5h 80% | 7d 65%",
+        summary: "5h left 80% | 7d left 65%",
         exhausted: false,
         needsReauth: false,
       }),
-    ).toBe("Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
+    ).toBe("Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
   });
 
   it("adds cooldown and reauth markers to the compact footer while keeping the provider display human-first", () => {
@@ -72,11 +72,11 @@ describe("account-router status rendering", () => {
         providerName: "openai-codex-2",
         providerDisplayName: "ChatGPT Plus/Pro (Codex)",
         displayName: "person@example.com",
-        summary: "5h 80% | 7d 65%",
+        summary: "5h left 80% | 7d left 65%",
         exhausted: true,
         needsReauth: true,
       }),
-    ).toBe("person@example.com | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65% | cooldown | reauth");
+    ).toBe("person@example.com | ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65% | cooldown | reauth");
   });
 });
 
@@ -173,7 +173,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -203,7 +203,7 @@ describe("account-router command surface", () => {
       pinned: true,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65% | extra usage summary for resize coverage",
+      summary: "5h left 80% | 7d left 65% | extra usage summary for resize coverage",
       badges: ["usage", "silent failover"],
     };
     let panelFactory:
@@ -264,7 +264,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -307,7 +307,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const listAccounts = vi.fn().mockResolvedValue([account]);
@@ -345,7 +345,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const listAccounts = vi.fn().mockResolvedValue([account]);
@@ -383,7 +383,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -421,7 +421,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -459,7 +459,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -497,7 +497,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const host = createHost({
@@ -537,7 +537,7 @@ describe("account-router command surface", () => {
       pinned: false,
       exhausted: false,
       needsReauth: false,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage"],
     };
     const row = formatAccountRow(account);

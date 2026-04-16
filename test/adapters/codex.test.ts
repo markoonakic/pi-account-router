@@ -44,8 +44,8 @@ describe("codex adapter", () => {
     });
 
     expect(buildCodexAccountSnapshot(parsed)).toEqual({
-      summary: "chatgpt-pro | 5h 80% | 7d 65%",
-      details: ["chatgpt-pro", "5h 80%", "7d 65%"],
+      summary: "chatgpt-pro | 5h left 80% | 7d left 65%",
+      details: ["chatgpt-pro", "5h left 80%", "7d left 65%"],
       score: 145,
       badges: ["usage", "silent failover", "native login"],
     });
@@ -66,7 +66,7 @@ describe("codex adapter", () => {
     });
     expect(buildCodexAccountSnapshot(parsed)).toMatchObject({
       identity: "person@example.com",
-      summary: "chatgpt-pro | 5h 80% | 7d 65%",
+      summary: "chatgpt-pro | 5h left 80% | 7d left 65%",
     });
   });
 
@@ -117,8 +117,8 @@ describe("codex adapter", () => {
       }),
     );
     expect(snapshot).toEqual({
-      summary: "chatgpt-pro | 5h 80% | 7d 65%",
-      details: ["chatgpt-pro", "5h 80%", "7d 65%"],
+      summary: "chatgpt-pro | 5h left 80% | 7d left 65%",
+      details: ["chatgpt-pro", "5h left 80%", "7d left 65%"],
       score: 145,
       badges: ["usage", "silent failover", "native login"],
     });

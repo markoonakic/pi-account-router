@@ -78,7 +78,7 @@ describe("family router selection", () => {
 
     const catalog = buildAccountCatalog(store.getAccounts(), store.getState(), {
       "openai-codex-2": {
-        summary: "5h 80% | 7d 65%",
+        summary: "5h left 80% | 7d left 65%",
         details: [],
         score: 80,
         badges: ["usage", "silent failover"],
@@ -88,7 +88,7 @@ describe("family router selection", () => {
     expect(catalog.find((entry) => entry.providerName === "openai-codex-2")).toMatchObject({
       active: true,
       pinned: true,
-      summary: "5h 80% | 7d 65%",
+      summary: "5h left 80% | 7d left 65%",
       badges: ["usage", "silent failover"],
     });
     expect(catalog.find((entry) => entry.providerName === "openai-codex-3")).toMatchObject({ exhausted: true });
