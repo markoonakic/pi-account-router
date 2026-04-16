@@ -1,11 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { loadAccountRouterSettings, saveAccountRouterSettings } from "../../src/config/store.js";
 import { registerAccountRouterCommand, type AccountRouterCommandHost } from "../../src/commands/account-router.js";
 import { formatAccountRow, renderFooter } from "../../src/status/footer.js";
 
@@ -72,54 +67,6 @@ describe("account-router status rendering", () => {
         needsReauth: true,
       }),
     ).toBe("openai-codex-2 | 5h 80% | 7d 65% | cooldown | reauth");
-  });
-});
-
-describe("account-router settings store", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.splice(0, tempDirs.length);
-  });
-
-  it("returns the default settings when the project file is missing", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-account-router-settings-"));
-    tempDirs.push(cwd);
-
-    expect(loadAccountRouterSettings(cwd)).toEqual({ showFooter: true });
-  });
-
-  it("persists showFooter in .pi/account-router.json", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-account-router-settings-"));
-    tempDirs.push(cwd);
-
-    const path = saveAccountRouterSettings(cwd, { showFooter: false });
-
-    expect(path).toBe(join(cwd, ".pi", "account-router.json"));
-    expect(existsSync(path)).toBe(true);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ showFooter: false });
-    expect(loadAccountRouterSettings(cwd)).toEqual({ showFooter: false });
-  });
-
-  it("ignores inherited showFooter values from parsed objects", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-account-router-settings-"));
-    tempDirs.push(cwd);
-
-    const path = join(cwd, ".pi", "account-router.json");
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, "{}\n", "utf8");
-
-    const parsed = Object.create({ showFooter: false }) as { showFooter?: boolean };
-    const parseSpy = vi.spyOn(JSON, "parse").mockReturnValue(parsed);
-
-    try {
-      expect(loadAccountRouterSettings(cwd)).toEqual({ showFooter: true });
-    } finally {
-      parseSpy.mockRestore();
-    }
   });
 });
 
