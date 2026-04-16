@@ -5,7 +5,6 @@ import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
 import { getApiProvider, type Api } from "@mariozechner/pi-ai";
 import { discoverAccounts } from "./auth/discovery.js";
-import { importMulticodexAccounts, previewMulticodexImport } from "./auth/import-multicodex.js";
 import { addAccountAndLogin } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
 import { loadAccountRouterSettings } from "./config/store.js";
@@ -196,33 +195,19 @@ export function installAccountRouter(
     async refresh(ctx: ExtensionCommandContext) {
       await refreshFromContext(ctx);
     },
-    async importMulticodex(ctx: ExtensionCommandContext, dryRun: boolean) {
-      if (dryRun) {
-        const preview = previewMulticodexImport();
-        const rows = preview.rows.map((row) => {
-          const active = row.isActiveSource ? " (active source)" : "";
-          const accountId = row.accountId ? ` accountId=${row.accountId}` : "";
-          return `${row.providerName} <- ${row.email}${active}${accountId}`;
-        });
+    async renameAccount(providerName: string, ctx: ExtensionCommandContext) {
+      ctx.ui.notify(`Rename flow coming soon for ${providerName}.`, "info");
+    },
+    async showAccountDetails(providerName: string, ctx: ExtensionCommandContext) {
+      const snapshot = snapshots[providerName];
+      const details = snapshot?.details.length ? snapshot.details : ["No additional details available yet."];
 
-        return [`Would import ${preview.accountCount} multicodex account(s):`, ...rows].join("\n");
-      }
-
-      const result = importMulticodexAccounts(ctx.modelRegistry.authStorage);
-      ctx.modelRegistry.refresh();
-      await refreshFromContext(ctx);
-
-      const rows = result.rows.map((row) => {
-        const active = row.isActiveSource ? " (active source)" : "";
-        const accountId = row.accountId ? ` accountId=${row.accountId}` : "";
-        return `${row.providerName} <- ${row.email}${active}${accountId}`;
-      });
-
-      return [
-        `Imported ${result.accountCount} multicodex account(s).`,
-        `Backup: ${result.backupPath}`,
-        ...rows,
-      ].join("\n");
+      ctx.ui.notify(
+        [providerName, snapshot?.summary, ...details]
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .join("\n"),
+        "info",
+      );
     },
     statusText() {
       return getStatusText();

@@ -1,8 +1,15 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@mariozechner/pi-coding-agent";
+import { matchesKey, truncateToWidth, type TUI } from "@mariozechner/pi-tui";
 
 import type { ProviderFamilyId } from "../adapters/types.js";
-import { FAMILY_DEFS } from "../providers/families.js";
+import { FAMILY_DEFS, getFamilyForProviderName } from "../providers/families.js";
 import { formatAccountRow, type FooterAccountEntry } from "../status/footer.js";
+import {
+  formatFamilySectionHeader,
+  formatSecondaryGhostLine,
+  resolvePrimaryAccountName,
+} from "../ui/account-display.js";
+import { buildAccountPanelShell, type AccountPanelShellModel } from "../ui/account-panel.js";
 
 export interface AccountRouterCommandHost {
   listAccounts(ctx: ExtensionCommandContext): Promise<FooterAccountEntry[]>;
@@ -10,9 +17,24 @@ export interface AccountRouterCommandHost {
   pinAccount(providerName: string): void;
   unpin(family?: ProviderFamilyId): void;
   refresh(ctx: ExtensionCommandContext): Promise<void>;
-  importMulticodex(ctx: ExtensionCommandContext, dryRun: boolean): Promise<string>;
+  renameAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
+  showAccountDetails(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   statusText(): string;
   debugText(): string;
+}
+
+type AccountPanelAction =
+  | { action: "select"; providerName: string }
+  | { action: "refresh" }
+  | { action: "rename"; providerName: string }
+  | { action: "details"; providerName: string }
+  | { action: "add" }
+  | { action: "remove"; providerName: string };
+
+interface AccountPanelSectionEntry {
+  familyId: string;
+  familyDisplayName: string;
+  accounts: FooterAccountEntry[];
 }
 
 function splitArgs(args: string): string[] {
@@ -22,6 +44,279 @@ function splitArgs(args: string): string[] {
 
 function isProviderFamilyId(value: string): value is ProviderFamilyId {
   return Object.hasOwn(FAMILY_DEFS, value);
+}
+
+function getFamilyDisplayName(account: FooterAccountEntry): string {
+  const family = getFamilyForProviderName(account.providerName);
+  return family === undefined ? account.displayName ?? account.providerName : FAMILY_DEFS[family].displayName;
+}
+
+function getPanelGhostSummary(accounts: readonly FooterAccountEntry[]): string {
+  if (accounts.length === 0) {
+    return "No routed accounts discovered";
+  }
+
+  const activeCount = accounts.filter((account) => account.active).length;
+  const attentionCount = accounts.filter((account) => account.exhausted || account.needsReauth).length;
+
+  return [
+    `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}`,
+    `${activeCount} active`,
+    attentionCount > 0 ? `${attentionCount} need attention` : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" · ");
+}
+
+function getPanelRowSummary(account: FooterAccountEntry): string | undefined {
+  const summaryBits = [
+    account.active ? "Active" : undefined,
+    account.pinned ? "Pinned" : undefined,
+    account.exhausted ? "Cooldown" : undefined,
+    account.needsReauth ? "Reauth" : undefined,
+    ...account.badges,
+    account.summary,
+  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
+
+  return summaryBits.length === 0 ? undefined : summaryBits.join(" · ");
+}
+
+function buildPanelSections(accounts: readonly FooterAccountEntry[]): AccountPanelSectionEntry[] {
+  const sections = new Map<string, AccountPanelSectionEntry>();
+
+  for (const account of accounts) {
+    const family = getFamilyForProviderName(account.providerName);
+    const familyId = family ?? account.providerName;
+    const familyDisplayName = getFamilyDisplayName(account);
+    const existing = sections.get(familyId);
+
+    if (existing) {
+      existing.accounts.push(account);
+      continue;
+    }
+
+    sections.set(familyId, {
+      familyId,
+      familyDisplayName,
+      accounts: [account],
+    });
+  }
+
+  return [...sections.values()];
+}
+
+function buildAccountPanel(accounts: readonly FooterAccountEntry[]): AccountPanelShellModel {
+  return buildAccountPanelShell({
+    ghostSummary: getPanelGhostSummary(accounts),
+    sections: buildPanelSections(accounts).map((section) => ({
+      familyId: section.familyId,
+      familyTitle: formatFamilySectionHeader({
+        providerDisplayName: section.familyDisplayName,
+        accountCount: section.accounts.length,
+        activeCount: section.accounts.filter((account) => account.active).length,
+      }),
+      rows: section.accounts.map((account) => {
+        const rowSummary = getPanelRowSummary(account);
+
+        return {
+          accountId: account.providerName,
+          primaryText: resolvePrimaryAccountName({
+            providerName: account.providerName,
+            providerDisplayName: section.familyDisplayName,
+            ...(account.displayName === undefined ? {} : { label: account.displayName }),
+          }),
+          secondaryText: formatSecondaryGhostLine({
+            providerName: account.providerName,
+            providerDisplayName: section.familyDisplayName,
+            ...(rowSummary === undefined ? {} : { summary: rowSummary }),
+          }),
+        };
+      }),
+    })),
+  });
+}
+
+function createAccountPanelComponent(
+  tui: TUI,
+  theme: Theme,
+  shell: AccountPanelShellModel,
+  done: (result: AccountPanelAction | undefined) => void,
+) {
+  const rows = shell.sections.flatMap((section) => section.rows.map((row) => ({ section, row })));
+  let selectedIndex = rows.length > 0 ? 0 : -1;
+  let cachedLines: string[] | undefined;
+  let cachedWidth: number | undefined;
+
+  const clearCache = () => {
+    cachedLines = undefined;
+    cachedWidth = undefined;
+  };
+
+  const getSelectedRow = () => (selectedIndex >= 0 ? rows[selectedIndex]?.row : undefined);
+
+  return {
+    handleInput(data: string): void {
+      if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+        done(undefined);
+        return;
+      }
+
+      if (matchesKey(data, "up") && rows.length > 0) {
+        selectedIndex = Math.max(0, selectedIndex - 1);
+        clearCache();
+        tui.requestRender();
+        return;
+      }
+
+      if (matchesKey(data, "down") && rows.length > 0) {
+        selectedIndex = Math.min(rows.length - 1, selectedIndex + 1);
+        clearCache();
+        tui.requestRender();
+        return;
+      }
+
+      if (matchesKey(data, "u")) {
+        done({ action: "refresh" });
+        return;
+      }
+
+      if (matchesKey(data, "a")) {
+        done({ action: "add" });
+        return;
+      }
+
+      const selectedRow = getSelectedRow();
+      if (selectedRow === undefined) {
+        return;
+      }
+
+      if (matchesKey(data, "enter") || matchesKey(data, "return")) {
+        done({ action: "select", providerName: selectedRow.accountId });
+        return;
+      }
+
+      if (matchesKey(data, "r")) {
+        done({ action: "rename", providerName: selectedRow.accountId });
+        return;
+      }
+
+      if (matchesKey(data, "d")) {
+        done({ action: "details", providerName: selectedRow.accountId });
+        return;
+      }
+
+      if (matchesKey(data, "backspace")) {
+        done({ action: "remove", providerName: selectedRow.accountId });
+      }
+    },
+    render(width: number): string[] {
+      if (cachedLines !== undefined && cachedWidth === width) {
+        return cachedLines;
+      }
+
+      const lines: string[] = [];
+      const addLine = (line = "") => {
+        lines.push(truncateToWidth(line, width));
+      };
+
+      addLine(theme.fg("accent", theme.bold(shell.header.title)));
+      addLine(theme.fg("muted", shell.header.ghostSummary));
+      addLine(theme.fg("dim", shell.header.hotkeys.map((hotkey) => `${hotkey.key} ${hotkey.label}`).join(" • ")));
+      addLine();
+
+      if (rows.length === 0) {
+        addLine(theme.fg("warning", "No routed accounts discovered"));
+        addLine();
+        addLine(theme.fg("dim", "u refresh • esc close"));
+        cachedLines = lines;
+        cachedWidth = width;
+        return lines;
+      }
+
+      let rowIndex = 0;
+      for (const section of shell.sections) {
+        addLine(theme.fg("accent", section.familyTitle));
+
+        for (const row of section.rows) {
+          const isSelected = rowIndex === selectedIndex;
+          const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
+          const primaryText = isSelected ? theme.fg("accent", row.lines.primary) : theme.fg("text", row.lines.primary);
+
+          addLine(`${prefix}${primaryText}`);
+          addLine(`  ${theme.fg("muted", row.lines.secondary)}`);
+          rowIndex += 1;
+        }
+
+        addLine();
+      }
+
+      cachedLines = lines;
+      cachedWidth = width;
+      return lines;
+    },
+    invalidate(): void {
+      clearCache();
+    },
+  };
+}
+
+async function showAccountPanel(
+  ctx: ExtensionCommandContext,
+  accounts: readonly FooterAccountEntry[],
+): Promise<AccountPanelAction | undefined> {
+  const shell = buildAccountPanel(accounts);
+
+  return ctx.ui.custom<AccountPanelAction | undefined>((tui, theme, _keybindings, done) =>
+    createAccountPanelComponent(tui, theme, shell, done)
+  );
+}
+
+async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRouterCommandHost): Promise<void> {
+  let accounts = await host.listAccounts(ctx);
+
+  if (!ctx.hasUI) {
+    const rows = accounts.map((account) => formatAccountRow(account));
+    ctx.ui.notify(rows.join("\n") || "No routed accounts discovered", "info");
+    return;
+  }
+
+  while (true) {
+    const action = await showAccountPanel(ctx, accounts);
+
+    if (action === undefined) {
+      return;
+    }
+
+    if (action.action === "select") {
+      host.pinAccount(action.providerName);
+      ctx.ui.notify(`Pinned ${action.providerName}`, "info");
+      return;
+    }
+
+    if (action.action === "refresh") {
+      accounts = await host.listAccounts(ctx);
+      continue;
+    }
+
+    if (action.action === "rename") {
+      await host.renameAccount(action.providerName, ctx);
+      accounts = await host.listAccounts(ctx);
+      continue;
+    }
+
+    if (action.action === "details") {
+      await host.showAccountDetails(action.providerName, ctx);
+      accounts = await host.listAccounts(ctx);
+      continue;
+    }
+
+    if (action.action === "add") {
+      ctx.ui.notify("Use /account-router add <family> to add an account.", "info");
+      continue;
+    }
+
+    ctx.ui.notify(`Account removal is not available yet for ${action.providerName}.`, "info");
+  }
 }
 
 export function registerAccountRouterCommand(
@@ -86,58 +381,12 @@ export function registerAccountRouterCommand(
         return;
       }
 
-      if (subcommand === "import") {
-        if (value !== "multicodex") {
-          ctx.ui.notify("Usage: /account-router import multicodex [dry-run]", "error");
-          return;
-        }
-
-        const tokens = splitArgs(args);
-        const dryRun = tokens[2] === "dry-run";
-        const result = await host.importMulticodex(ctx, dryRun);
-        ctx.ui.notify(result, dryRun ? "info" : "warning");
-        return;
-      }
-
       if (subcommand !== undefined) {
         ctx.ui.notify(`Unknown subcommand: ${subcommand}`, "error");
         return;
       }
 
-      const accounts = await host.listAccounts(ctx);
-      const rows = accounts.map((account) => ({
-        providerName: account.providerName,
-        row: formatAccountRow(account),
-      }));
-
-      if (!ctx.hasUI) {
-        ctx.ui.notify(rows.map((entry) => entry.row).join("\n") || "No routed accounts discovered", "info");
-        return;
-      }
-
-      const choice = await ctx.ui.select("Account Router", ["status", "refresh", ...rows.map((entry) => entry.row)]);
-
-      if (choice === undefined) {
-        return;
-      }
-
-      if (choice === "status") {
-        ctx.ui.notify(host.statusText(), "info");
-        return;
-      }
-
-      if (choice === "refresh") {
-        await host.refresh(ctx);
-        ctx.ui.notify("Account router refreshed", "info");
-        return;
-      }
-
-      const selectedAccount = rows.find((entry) => entry.row === choice);
-
-      if (selectedAccount !== undefined) {
-        host.pinAccount(selectedAccount.providerName);
-        ctx.ui.notify(`Pinned ${selectedAccount.providerName}`, "info");
-      }
+      await runDefaultCommand(ctx, host);
     },
   });
 }
