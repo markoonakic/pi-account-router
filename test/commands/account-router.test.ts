@@ -35,11 +35,14 @@ function createContext(overrides: Partial<ExtensionCommandContext> = {}): Extens
 }
 
 describe("account-router status rendering", () => {
-  it("formats account rows with badges and state", () => {
+  it("formats account rows with human-first names plus provider display and usage context", () => {
     expect(
       formatAccountRow({
         providerName: "openai-codex-2",
-        displayName: "ChatGPT Codex #2",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        displayName: "Work Pro Codex",
+        label: "Work Pro Codex",
+        identity: "work@example.com",
         active: true,
         pinned: true,
         exhausted: false,
@@ -47,29 +50,33 @@ describe("account-router status rendering", () => {
         summary: "5h 80% | 7d 65%",
         badges: ["usage", "silent failover"],
       }),
-    ).toBe("openai-codex-2 — ChatGPT Codex #2 — active pinned [usage] [silent failover] — 5h 80% | 7d 65%");
+    ).toBe("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65% — active pinned");
   });
 
-  it("renders a compact footer for the active account", () => {
+  it("renders a compact footer with the human-first name instead of the raw provider key", () => {
     expect(
       renderFooter({
         providerName: "openai-codex-2",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        displayName: "Work Pro Codex",
         summary: "5h 80% | 7d 65%",
         exhausted: false,
         needsReauth: false,
       }),
-    ).toBe("openai-codex-2 | 5h 80% | 7d 65%");
+    ).toBe("Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
   });
 
-  it("adds cooldown and reauth markers to the compact footer when needed", () => {
+  it("adds cooldown and reauth markers to the compact footer while keeping the provider display human-first", () => {
     expect(
       renderFooter({
         providerName: "openai-codex-2",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        displayName: "person@example.com",
         summary: "5h 80% | 7d 65%",
         exhausted: true,
         needsReauth: true,
       }),
-    ).toBe("openai-codex-2 | 5h 80% | 7d 65% | cooldown | reauth");
+    ).toBe("person@example.com | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65% | cooldown | reauth");
   });
 });
 

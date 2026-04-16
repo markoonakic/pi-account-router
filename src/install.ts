@@ -29,24 +29,16 @@ function getCapabilityBadges(family: ProviderFamilyId): string[] {
   ].filter((value): value is string => value !== undefined);
 }
 
-function getDisplayName(entry: { family: ProviderFamilyId; aliasIndex: number }): string {
-  const displayName = ADAPTERS[entry.family].displayName;
-  return entry.aliasIndex > 1 ? `${displayName} #${entry.aliasIndex}` : displayName;
-}
-
 export function installAccountRouter(
   pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on">,
 ): void {
   const store = createRuntimeStore();
   let snapshots: Record<string, AccountSnapshot | undefined> = {};
 
-  function buildCatalog(): Array<AccountCatalogEntry & { displayName: string }> {
+  function buildCatalog(): AccountCatalogEntry[] {
     const settings = loadAccountRouterSettings();
 
-    return buildAccountCatalog(store.getAccounts(), store.getState(), snapshots).map((entry) => ({
-      ...entry,
-      displayName: settings.labels[entry.providerName] ?? getDisplayName(entry),
-    }));
+    return buildAccountCatalog(store.getAccounts(), store.getState(), snapshots, settings.labels);
   }
 
   function getStatusText(): string {
@@ -54,7 +46,7 @@ export function installAccountRouter(
     return rows.join("\n") || EMPTY_STATUS_TEXT;
   }
 
-  function getFooterEntry(ctx: ExtensionContext, catalog: Array<AccountCatalogEntry & { displayName: string }>) {
+  function getFooterEntry(ctx: ExtensionContext, catalog: AccountCatalogEntry[]) {
     const currentFamily = ctx.model ? getFamilyForProviderName(ctx.model.provider) : undefined;
 
     if (currentFamily !== undefined) {
@@ -196,7 +188,7 @@ export function installAccountRouter(
     ctx.modelRegistry.refresh();
   }
 
-  async function refreshFromContext(ctx: ExtensionContext): Promise<Array<AccountCatalogEntry & { displayName: string }>> {
+  async function refreshFromContext(ctx: ExtensionContext): Promise<AccountCatalogEntry[]> {
     store.bindModelRegistry(ctx.modelRegistry);
     store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
     snapshots = await buildSnapshots(ctx);

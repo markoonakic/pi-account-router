@@ -3,13 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { loadAccountRouterSettings } from "../src/config/store.js";
+import { loadAccountRouterSettings, saveAccountRouterSettings } from "../src/config/store.js";
 import { installAccountRouter } from "../src/install.js";
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 
   for (const dir of tempDirs) {
     rmSync(dir, { recursive: true, force: true });
@@ -59,6 +60,47 @@ function createModelRegistry(authStorage: ReturnType<typeof createAuthStorage>) 
       },
     })),
   };
+}
+
+const FIVE_HOURS = 5 * 60 * 60;
+const SEVEN_DAYS = 7 * 24 * 60 * 60;
+
+function stubCodexUsageFetchByToken(
+  responses: Record<string, { email: string; fiveHourUsedPercent: number; weeklyUsedPercent: number }>,
+) {
+  const fetchMock = vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+    const token = init?.headers?.Authorization?.replace(/^Bearer\s+/, "");
+    const response = token === undefined ? undefined : responses[token];
+
+    if (response === undefined) {
+      return {
+        ok: false,
+        json: vi.fn().mockResolvedValue({}),
+      };
+    }
+
+    return {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        email: response.email,
+        rate_limit: {
+          primary_window: {
+            used_percent: response.fiveHourUsedPercent,
+            limit_window_seconds: FIVE_HOURS,
+            reset_at: 4_102_444_800,
+          },
+          secondary_window: {
+            used_percent: response.weeklyUsedPercent,
+            limit_window_seconds: SEVEN_DAYS,
+            reset_at: 4_102_444_800,
+          },
+        },
+      }),
+    };
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function createContext(modelRegistry: ReturnType<typeof createModelRegistry>, overrides: Record<string, unknown> = {}) {
@@ -134,6 +176,13 @@ describe("installAccountRouter", () => {
     const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
     tempDirs.push(agentDir);
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    stubCodexUsageFetchByToken({
+      "alias-access": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+    });
 
     const registerCommand = vi.fn();
     const pi = {
@@ -181,10 +230,139 @@ describe("installAccountRouter", () => {
 
     await command.handler("", textCtx);
 
-    expect(textCtx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Work Pro Codex"),
-      "info",
+    const laterRenderedText = (textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(laterRenderedText).toContain("Work Pro Codex — ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
+    expect(laterRenderedText).not.toContain("openai-codex-2");
+    expect(laterRenderedText).not.toContain("[usage]");
+    expect(textCtx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+  });
+
+  it("feeds the footer with the human-first name instead of the raw provider key", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    stubCodexUsageFetchByToken({
+      "alias-access": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+    });
+    saveAccountRouterSettings({ agentDir }, {
+      showFooter: true,
+      labels: {
+        "openai-codex-2": "Work Pro Codex",
+      },
+    });
+
+    const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+    const pi = {
+      registerCommand: vi.fn(),
+      registerProvider: vi.fn(),
+      on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+        handlers.set(event, handler);
+      }),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await handlers.get("session_start")?.({}, ctx);
+
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "account-router",
+      "Work Pro Codex | ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%",
     );
+  });
+
+  it("renders grouped family headers with counts and clean provider usage lines in the panel", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    stubCodexUsageFetchByToken({
+      "alias-access-2": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+      "alias-access-3": {
+        email: "person@example.com",
+        fiveHourUsedPercent: 45,
+        weeklyUsedPercent: 58,
+      },
+    });
+    saveAccountRouterSettings({ agentDir }, {
+      labels: {
+        "openai-codex-2": "Work Pro Codex",
+      },
+    });
+
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access-2", refresh: "r2", expires: 4_102_444_800_000 },
+      "openai-codex-3": { type: "oauth", access: "alias-access-3", refresh: "r3", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(panelFactory).toBeTypeOf("function");
+
+    if (panelFactory === undefined) {
+      return;
+    }
+
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      {
+        fg: (_color: string, text: string) => text,
+        bold: (text: string) => text,
+      },
+      {},
+      vi.fn(),
+    );
+
+    const lines = component.render(120);
+
+    expect(lines).toContain("ChatGPT Plus/Pro (Codex) · 2 accounts · 1 active");
+    expect(lines).toContain("› Work Pro Codex");
+    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h 80% | 7d 65%");
   });
 
   it("dispatches reauth from the account details menu", async () => {

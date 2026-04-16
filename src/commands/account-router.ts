@@ -4,11 +4,7 @@ import { matchesKey, truncateToWidth, type TUI } from "@mariozechner/pi-tui";
 import type { ProviderFamilyId } from "../adapters/types.js";
 import { FAMILY_DEFS, getFamilyForProviderName } from "../providers/families.js";
 import { formatAccountRow, type FooterAccountEntry } from "../status/footer.js";
-import {
-  formatFamilySectionHeader,
-  formatSecondaryGhostLine,
-  resolvePrimaryAccountName,
-} from "../ui/account-display.js";
+import { formatFamilySectionHeader, formatSecondaryGhostLine, resolvePrimaryAccountName } from "../ui/account-display.js";
 import { buildAccountPanelShell, type AccountPanelShellModel } from "../ui/account-panel.js";
 
 export interface AccountRouterCommandHost {
@@ -49,6 +45,11 @@ function isProviderFamilyId(value: string): value is ProviderFamilyId {
 
 function getFamilyDisplayName(account: FooterAccountEntry): string {
   const family = getFamilyForProviderName(account.providerName);
+
+  if (account.providerDisplayName) {
+    return account.providerDisplayName;
+  }
+
   return family === undefined ? account.displayName ?? account.providerName : FAMILY_DEFS[family].displayName;
 }
 
@@ -67,19 +68,6 @@ function getPanelGhostSummary(accounts: readonly FooterAccountEntry[]): string {
   ]
     .filter((value): value is string => value !== undefined)
     .join(" · ");
-}
-
-function getPanelRowSummary(account: FooterAccountEntry): string | undefined {
-  const summaryBits = [
-    account.active ? "Active" : undefined,
-    account.pinned ? "Pinned" : undefined,
-    account.exhausted ? "Cooldown" : undefined,
-    account.needsReauth ? "Reauth" : undefined,
-    ...account.badges,
-    account.summary,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
-
-  return summaryBits.length === 0 ? undefined : summaryBits.join(" · ");
 }
 
 function buildPanelSections(accounts: readonly FooterAccountEntry[]): AccountPanelSectionEntry[] {
@@ -116,23 +104,20 @@ function buildAccountPanel(accounts: readonly FooterAccountEntry[]): AccountPane
         accountCount: section.accounts.length,
         activeCount: section.accounts.filter((account) => account.active).length,
       }),
-      rows: section.accounts.map((account) => {
-        const rowSummary = getPanelRowSummary(account);
-
-        return {
-          accountId: account.providerName,
-          primaryText: resolvePrimaryAccountName({
-            providerName: account.providerName,
-            providerDisplayName: section.familyDisplayName,
-            ...(account.displayName === undefined ? {} : { label: account.displayName }),
-          }),
-          secondaryText: formatSecondaryGhostLine({
-            providerName: account.providerName,
-            providerDisplayName: section.familyDisplayName,
-            ...(rowSummary === undefined ? {} : { summary: rowSummary }),
-          }),
-        };
-      }),
+      rows: section.accounts.map((account) => ({
+        accountId: account.providerName,
+        primaryText: account.displayName ?? resolvePrimaryAccountName({
+          providerName: account.providerName,
+          providerDisplayName: section.familyDisplayName,
+          ...(account.label === undefined ? {} : { label: account.label }),
+          ...(account.identity === undefined ? {} : { identity: account.identity }),
+        }),
+        secondaryText: account.secondaryText ?? formatSecondaryGhostLine({
+          providerName: account.providerName,
+          providerDisplayName: section.familyDisplayName,
+          ...(account.summary === undefined ? {} : { summary: account.summary }),
+        }),
+      })),
     })),
   });
 }
