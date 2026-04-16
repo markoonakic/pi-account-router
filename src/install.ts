@@ -7,13 +7,14 @@ import { getApiProvider, type Api } from "@mariozechner/pi-ai";
 import { discoverAccounts } from "./auth/discovery.js";
 import { addAccountAndLogin } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
-import { loadAccountRouterSettings } from "./config/store.js";
+import { loadAccountRouterSettings, saveAccountRouterSettings } from "./config/store.js";
 import { getFamilyForProviderName } from "./providers/families.js";
 import { syncProviders } from "./providers/register.js";
 import { selectAccountForFamily } from "./routing/router.js";
 import { createFamilyRouterStream } from "./routing/stream.js";
 import { createRuntimeStore } from "./runtime/store.js";
 import { formatAccountRow, renderFooter } from "./status/footer.js";
+import { confirmAccountRemoval, promptForAccountRename, showAccountDetailsMenu } from "./ui/account-actions.js";
 
 const EMPTY_STATUS_TEXT = "No routed accounts discovered";
 
@@ -40,9 +41,11 @@ export function installAccountRouter(
   let snapshots: Record<string, AccountSnapshot | undefined> = {};
 
   function buildCatalog(): Array<AccountCatalogEntry & { displayName: string }> {
+    const settings = loadAccountRouterSettings();
+
     return buildAccountCatalog(store.getAccounts(), store.getState(), snapshots).map((entry) => ({
       ...entry,
-      displayName: getDisplayName(entry),
+      displayName: settings.labels[entry.providerName] ?? getDisplayName(entry),
     }));
   }
 
@@ -130,6 +133,69 @@ export function installAccountRouter(
     }
   }
 
+  async function removeAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void> {
+    const account = buildCatalog().find((entry) => entry.providerName === providerName);
+    const displayName = account?.displayName ?? providerName;
+    const confirmed = await confirmAccountRemoval(ctx.ui, { providerName, displayName });
+
+    if (!confirmed) {
+      return;
+    }
+
+    ctx.modelRegistry.authStorage.remove(providerName);
+    ctx.modelRegistry.refresh();
+
+    if (account !== undefined) {
+      store.setPinnedProvider(account.family, undefined);
+      store.setActiveProvider(account.family, undefined);
+    }
+
+    store.clearExhausted(providerName);
+    store.markNeedsReauth(providerName, false);
+
+    const settings = loadAccountRouterSettings(ctx.cwd);
+    if (Object.hasOwn(settings.labels, providerName)) {
+      const labels = { ...settings.labels };
+      delete labels[providerName];
+      saveAccountRouterSettings(ctx.cwd, {
+        ...settings,
+        labels,
+      });
+    }
+  }
+
+  async function reauthenticateAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void> {
+    await ctx.modelRegistry.authStorage.login(providerName, {
+      onAuth: ({ instructions, url }) => {
+        ctx.ui.notify(instructions ? `${instructions}\n${url}` : url, "info");
+      },
+      onPrompt: async (prompt) => {
+        const value = prompt.placeholder === undefined
+          ? await ctx.ui.input(prompt.message)
+          : await ctx.ui.input(prompt.message, prompt.placeholder);
+
+        if (value === undefined) {
+          throw new Error("Authentication input cancelled by user");
+        }
+
+        return value;
+      },
+      onManualCodeInput: async () => {
+        const value = await ctx.ui.input("Paste the authorization code or full redirect URL:");
+
+        if (value === undefined) {
+          throw new Error("Authentication input cancelled by user");
+        }
+
+        return value;
+      },
+      onProgress: (message) => {
+        ctx.ui.notify(message, "info");
+      },
+    });
+    ctx.modelRegistry.refresh();
+  }
+
   async function refreshFromContext(ctx: ExtensionContext): Promise<Array<AccountCatalogEntry & { displayName: string }>> {
     store.bindModelRegistry(ctx.modelRegistry);
     store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
@@ -196,18 +262,43 @@ export function installAccountRouter(
       await refreshFromContext(ctx);
     },
     async renameAccount(providerName: string, ctx: ExtensionCommandContext) {
-      ctx.ui.notify(`Rename flow coming soon for ${providerName}.`, "info");
+      const currentLabel = buildCatalog().find((entry) => entry.providerName === providerName)?.displayName;
+      const nextLabel = await promptForAccountRename(ctx.ui, { providerName, currentLabel });
+
+      if (nextLabel === undefined) {
+        return;
+      }
+
+      const settings = loadAccountRouterSettings(ctx.cwd);
+      saveAccountRouterSettings(ctx.cwd, {
+        ...settings,
+        labels: {
+          ...settings.labels,
+          [providerName]: nextLabel,
+        },
+      });
     },
     async showAccountDetails(providerName: string, ctx: ExtensionCommandContext) {
       const snapshot = snapshots[providerName];
-      const details = snapshot?.details.length ? snapshot.details : ["No additional details available yet."];
+      const account = buildCatalog().find((entry) => entry.providerName === providerName);
+      const action = await showAccountDetailsMenu(ctx.ui, {
+        providerName,
+        displayName: account?.displayName ?? providerName,
+        summary: snapshot?.summary,
+        details: snapshot?.details.length ? snapshot.details : ["No additional details available yet."],
+      });
 
-      ctx.ui.notify(
-        [providerName, snapshot?.summary, ...details]
-          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-          .join("\n"),
-        "info",
-      );
+      if (action === "reauth") {
+        await reauthenticateAccount(providerName, ctx);
+        return;
+      }
+
+      if (action === "remove") {
+        await removeAccount(providerName, ctx);
+      }
+    },
+    async removeAccount(providerName: string, ctx: ExtensionCommandContext) {
+      await removeAccount(providerName, ctx);
     },
     statusText() {
       return getStatusText();

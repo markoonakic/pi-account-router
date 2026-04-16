@@ -19,6 +19,7 @@ export interface AccountRouterCommandHost {
   refresh(ctx: ExtensionCommandContext): Promise<void>;
   renameAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   showAccountDetails(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
+  removeAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   statusText(): string;
   debugText(): string;
 }
@@ -315,7 +316,8 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
       continue;
     }
 
-    ctx.ui.notify(`Account removal is not available yet for ${action.providerName}.`, "info");
+    await host.removeAccount(action.providerName, ctx);
+    accounts = await host.listAccounts(ctx);
   }
 }
 

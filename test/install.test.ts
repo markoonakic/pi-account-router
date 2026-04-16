@@ -1,6 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { loadAccountRouterSettings } from "../src/config/store.js";
 import { installAccountRouter } from "../src/install.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+
+  for (const dir of tempDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  tempDirs.splice(0, tempDirs.length);
+});
 
 function createModel(provider: string) {
   return {
@@ -14,6 +29,57 @@ function createModel(provider: string) {
     cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 1_050_000,
     maxTokens: 32_768,
+  };
+}
+
+function createAuthStorage(initial: Record<string, unknown>) {
+  const records = new Map(Object.entries(initial));
+
+  return {
+    getAll: () => Object.fromEntries(records),
+    get: (providerName: string) => records.get(providerName),
+    login: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn((providerName: string) => {
+      records.delete(providerName);
+    }),
+  };
+}
+
+function createModelRegistry(authStorage: ReturnType<typeof createAuthStorage>) {
+  return {
+    authStorage,
+    refresh: vi.fn(),
+    getAll: () => [createModel("openai-codex")],
+    find: vi.fn((provider: string, id: string) => ({ ...createModel(provider), id })),
+    getApiKeyAndHeaders: vi.fn(async (model: { provider: string }) => ({
+      ok: true,
+      apiKey: `token-for-${model.provider}`,
+      headers: {
+        Authorization: `Bearer ${model.provider}`,
+      },
+    })),
+  };
+}
+
+function createContext(modelRegistry: ReturnType<typeof createModelRegistry>, overrides: Record<string, unknown> = {}) {
+  const { ui: uiOverrides, ...rest } = overrides;
+  const ui = {
+    setStatus: vi.fn(),
+    notify: vi.fn(),
+    select: vi.fn().mockResolvedValue(undefined),
+    confirm: vi.fn().mockResolvedValue(true),
+    input: vi.fn().mockResolvedValue(undefined),
+    custom: vi.fn().mockResolvedValue(undefined),
+    ...((uiOverrides as Record<string, unknown> | undefined) ?? {}),
+  };
+
+  return {
+    cwd: process.cwd(),
+    modelRegistry,
+    model: createModel("openai-codex"),
+    hasUI: true,
+    ...rest,
+    ui,
   };
 }
 
@@ -32,37 +98,17 @@ describe("installAccountRouter", () => {
 
     installAccountRouter(pi as any);
 
-    const modelRegistry = {
-      authStorage: {
-        getAll: () => ({
-          "openai-codex": { type: "oauth", access: "base-access", refresh: "r1", expires: 4_102_444_800_000 },
-          "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
-        }),
-        get: (providerName: string) => ({ type: "oauth", access: `${providerName}-access`, refresh: "r", expires: 4_102_444_800_000 }),
-        login: vi.fn(),
-      },
-      refresh: vi.fn(),
-      getAll: () => [createModel("openai-codex")],
-      find: vi.fn((provider: string, id: string) => ({ ...createModel(provider), id })),
-      getApiKeyAndHeaders: vi.fn(async (model: { provider: string }) => ({
-        ok: true,
-        apiKey: `token-for-${model.provider}`,
-        headers: {
-          Authorization: `Bearer ${model.provider}`,
-        },
-      })),
-    };
-
-    const ctx = {
-      cwd: process.cwd(),
-      modelRegistry,
+    const authStorage = createAuthStorage({
+      "openai-codex": { type: "oauth", access: "base-access", refresh: "r1", expires: 4_102_444_800_000 },
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
       ui: {
         setStatus: vi.fn(),
         notify: vi.fn(),
       },
-      model: createModel("openai-codex"),
-      hasUI: true,
-    };
+    });
 
     await handlers.get("session_start")?.({}, ctx);
 
@@ -82,5 +128,175 @@ describe("installAccountRouter", () => {
       }),
     );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("account-router", expect.any(String));
+  });
+
+  it("persists a renamed label and uses it in later account rendering", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const interactiveCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        input: vi.fn().mockResolvedValue("Work Pro Codex"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "rename", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", interactiveCtx);
+
+    expect(interactiveCtx.ui.input).toHaveBeenCalledWith(expect.stringMatching(/rename/i), expect.any(String));
+    expect(loadAccountRouterSettings({ agentDir }).labels).toEqual({
+      "openai-codex-2": "Work Pro Codex",
+    });
+
+    const textCtx = createContext(modelRegistry, {
+      hasUI: false,
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await command.handler("", textCtx);
+
+    expect(textCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Work Pro Codex"),
+      "info",
+    );
+  });
+
+  it("dispatches reauth from the account details menu", async () => {
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const interactiveCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue("Reauthenticate"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "details", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", interactiveCtx);
+
+    expect(interactiveCtx.ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("openai-codex-2"),
+      expect.arrayContaining(["Reauthenticate", "Remove account", "Close"]),
+    );
+    expect(authStorage.login).toHaveBeenCalledWith(
+      "openai-codex-2",
+      expect.objectContaining({
+        onAuth: expect.any(Function),
+        onPrompt: expect.any(Function),
+        onManualCodeInput: expect.any(Function),
+        onProgress: expect.any(Function),
+      }),
+    );
+  });
+
+  it("requires confirmation before removing an account and updates later rendering", async () => {
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    const cancelCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        confirm: vi.fn().mockResolvedValue(false),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "remove", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    await command.handler("", cancelCtx);
+
+    expect(cancelCtx.ui.confirm).toHaveBeenCalledWith(
+      expect.stringMatching(/remove/i),
+      expect.stringContaining("openai-codex-2"),
+    );
+    expect(authStorage.remove).not.toHaveBeenCalled();
+
+    const confirmCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        confirm: vi.fn().mockResolvedValue(true),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "remove", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    await command.handler("", confirmCtx);
+
+    expect(authStorage.remove).toHaveBeenCalledWith("openai-codex-2");
+
+    const textCtx = createContext(modelRegistry, {
+      hasUI: false,
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await command.handler("", textCtx);
+
+    expect(textCtx.ui.notify).toHaveBeenCalledWith("No routed accounts discovered", "info");
   });
 });

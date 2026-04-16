@@ -13,6 +13,7 @@ function createHost(overrides: Partial<AccountRouterCommandHost> = {}): AccountR
     refresh: vi.fn().mockResolvedValue(undefined),
     renameAccount: vi.fn().mockResolvedValue(undefined),
     showAccountDetails: vi.fn().mockResolvedValue(undefined),
+    removeAccount: vi.fn().mockResolvedValue(undefined),
     statusText: vi.fn().mockReturnValue("status ok"),
     debugText: vi.fn().mockReturnValue("debug ok"),
     ...overrides,
@@ -357,6 +358,44 @@ describe("account-router command surface", () => {
     await command.handler("", ctx);
 
     expect(host.showAccountDetails).toHaveBeenCalledWith("openai-codex-2", ctx);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+  });
+
+  it("dispatches a remove action from the custom panel to the host", async () => {
+    const registerCommand = vi.fn();
+    const account = {
+      providerName: "openai-codex-2",
+      displayName: "ChatGPT Codex #2",
+      active: false,
+      pinned: false,
+      exhausted: false,
+      needsReauth: false,
+      summary: "5h 80% | 7d 65%",
+      badges: ["usage"],
+    };
+    const host = createHost({
+      listAccounts: vi.fn().mockResolvedValue([account]),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn(),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "remove", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(host.removeAccount).toHaveBeenCalledWith("openai-codex-2", ctx);
     expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
   });
 
