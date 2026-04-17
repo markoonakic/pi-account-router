@@ -654,6 +654,71 @@ describe("installAccountRouter", () => {
     );
   });
 
+  it("clears a label from the details menu and falls back to the account identity", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    stubCodexUsageFetchByToken({
+      "alias-access": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+    });
+    saveAccountRouterSettings({ agentDir }, {
+      labels: {
+        "openai-codex-2": "Work Pro Codex",
+      },
+    });
+
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const interactiveCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue("Clear label"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "details", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", interactiveCtx);
+
+    expect(loadAccountRouterSettings({ agentDir }).labels).toEqual({});
+
+    const textCtx = createContext(modelRegistry, {
+      hasUI: false,
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await command.handler("", textCtx);
+
+    const laterRenderedText = (textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(laterRenderedText).toContain("work@example.com — ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
+    expect(laterRenderedText).not.toContain("Work Pro Codex");
+  });
+
   it("requires confirmation before removing an account and updates later rendering", async () => {
     const registerCommand = vi.fn();
     const pi = {

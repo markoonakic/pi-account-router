@@ -12,6 +12,7 @@ export interface AccountDetailsMenuInput {
   displayName: string;
   summary?: string | undefined;
   details?: string[] | undefined;
+  hasLabel?: boolean | undefined;
 }
 
 export interface AccountRemovalConfirmInput {
@@ -24,9 +25,7 @@ export interface AddAccountFamilyOption {
   displayName: string;
 }
 
-export type AccountDetailsAction = "reauth" | "remove" | "show-provider-key" | undefined;
-
-const ACCOUNT_DETAILS_OPTIONS = ["Reauthenticate", "Remove account", "Show provider key"] as const;
+export type AccountDetailsAction = "reauth" | "remove" | "show-provider-key" | "clear-label" | undefined;
 
 function normalizeLabel(value: string | undefined): string | undefined {
   if (value === undefined) {
@@ -69,10 +68,20 @@ export async function showAccountDetailsMenu(
     input.summary,
     ...(input.details ?? []),
   ).join("\n");
-  const selection = await ui.select(title, [...ACCOUNT_DETAILS_OPTIONS]);
+  const options = [
+    "Reauthenticate",
+    ...(input.hasLabel ? ["Clear label"] : []),
+    "Remove account",
+    "Show provider key",
+  ] as const;
+  const selection = await ui.select(title, [...options]);
 
   if (selection === "Reauthenticate") {
     return "reauth";
+  }
+
+  if (selection === "Clear label") {
+    return "clear-label";
   }
 
   if (selection === "Remove account") {

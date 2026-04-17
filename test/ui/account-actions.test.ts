@@ -26,22 +26,33 @@ describe("account action helpers", () => {
     );
   });
 
-  it("shows details actions without a redundant close option and supports provider-key display", async () => {
-    const select = vi.fn().mockResolvedValue("Show provider key");
+  it("shows details actions without a redundant close option and supports clear-label and provider-key actions", async () => {
+    const clearLabelSelect = vi.fn().mockResolvedValue("Clear label");
 
     await expect(
-      showAccountDetailsMenu({ select } as any, {
+      showAccountDetailsMenu({ select: clearLabelSelect } as any, {
+        providerName: "openai-codex-2",
+        displayName: "Work Pro Codex",
+        summary: "5h left 80% · 7d left 65%",
+        details: ["detail one"],
+        hasLabel: true,
+      }),
+    ).resolves.toBe("clear-label");
+
+    expect(clearLabelSelect).toHaveBeenCalledWith(
+      expect.stringContaining("esc back"),
+      ["Reauthenticate", "Clear label", "Remove account", "Show provider key"],
+    );
+
+    const providerKeySelect = vi.fn().mockResolvedValue("Show provider key");
+    await expect(
+      showAccountDetailsMenu({ select: providerKeySelect } as any, {
         providerName: "openai-codex-2",
         displayName: "Work Pro Codex",
         summary: "5h left 80% · 7d left 65%",
         details: ["detail one"],
       }),
     ).resolves.toBe("show-provider-key");
-
-    expect(select).toHaveBeenCalledWith(
-      expect.stringContaining("esc back"),
-      ["Reauthenticate", "Remove account", "Show provider key"],
-    );
   });
 
   it("supports immediate rename, clear-label, and cancel distinctly", async () => {

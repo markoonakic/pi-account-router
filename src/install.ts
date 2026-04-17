@@ -126,6 +126,20 @@ export function installAccountRouter(
     }
   }
 
+  function clearLabel(providerName: string, cwd: string): void {
+    const settings = loadAccountRouterSettings(cwd);
+    if (!Object.hasOwn(settings.labels, providerName)) {
+      return;
+    }
+
+    const labels = { ...settings.labels };
+    delete labels[providerName];
+    saveAccountRouterSettings(cwd, {
+      ...settings,
+      labels,
+    });
+  }
+
   async function removeAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void> {
     const account = buildCatalog().find((entry) => entry.providerName === providerName);
     const displayName = account?.displayName ?? providerName;
@@ -145,16 +159,7 @@ export function installAccountRouter(
 
     store.clearExhausted(providerName);
     store.markNeedsReauth(providerName, false);
-
-    const settings = loadAccountRouterSettings(ctx.cwd);
-    if (Object.hasOwn(settings.labels, providerName)) {
-      const labels = { ...settings.labels };
-      delete labels[providerName];
-      saveAccountRouterSettings(ctx.cwd, {
-        ...settings,
-        labels,
-      });
-    }
+    clearLabel(providerName, ctx.cwd);
   }
 
   async function reauthenticateAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -321,6 +326,7 @@ export function installAccountRouter(
         displayName: account?.displayName ?? providerName,
         summary: snapshot?.summary,
         details: snapshot?.details.length ? snapshot.details : ["No additional details available yet."],
+        hasLabel: account?.label !== undefined,
       });
 
       if (action === "reauth") {
@@ -335,6 +341,11 @@ export function installAccountRouter(
 
       if (action === "show-provider-key") {
         ctx.ui.notify(providerName, "info");
+        return;
+      }
+
+      if (action === "clear-label") {
+        clearLabel(providerName, ctx.cwd);
       }
     },
     async removeAccount(providerName: string, ctx: ExtensionCommandContext) {
