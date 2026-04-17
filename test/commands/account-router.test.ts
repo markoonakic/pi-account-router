@@ -194,6 +194,79 @@ describe("account-router command surface", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
+  it("supports j/k as vim-style navigation aliases for down/up", async () => {
+    const registerCommand = vi.fn();
+    const accounts = [
+      {
+        providerName: "openai-codex-2",
+        displayName: "Work Pro Codex",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        active: true,
+        pinned: true,
+        exhausted: false,
+        needsReauth: false,
+        summary: "5h left 80% | 7d left 65%",
+        badges: ["usage", "silent failover"],
+      },
+      {
+        providerName: "openai-codex-3",
+        displayName: "Personal Pro",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        active: false,
+        pinned: false,
+        exhausted: false,
+        needsReauth: false,
+        summary: "5h left 55% | 7d left 42%",
+        badges: ["usage"],
+      },
+    ];
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const host = createHost({
+      listAccounts: vi.fn().mockResolvedValue(accounts),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(panelFactory).toBeTypeOf("function");
+    if (panelFactory === undefined) {
+      return;
+    }
+
+    const done = vi.fn();
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      {
+        fg: (_color: string, text: string) => text,
+        bold: (text: string) => text,
+      },
+      {},
+      done,
+    );
+
+    component.handleInput("j");
+    component.handleInput("enter");
+
+    expect(done).toHaveBeenCalledWith({ action: "select", providerName: "openai-codex-3" });
+  });
+
   it("re-renders the custom panel when the viewport width changes", async () => {
     const registerCommand = vi.fn();
     const account = {

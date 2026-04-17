@@ -148,14 +148,14 @@ function createAccountPanelComponent(
         return;
       }
 
-      if (matchesKey(data, "up") && rows.length > 0) {
+      if ((data === "k" || matchesKey(data, "up")) && rows.length > 0) {
         selectedIndex = Math.max(0, selectedIndex - 1);
         clearCache();
         tui.requestRender();
         return;
       }
 
-      if (matchesKey(data, "down") && rows.length > 0) {
+      if ((data === "j" || matchesKey(data, "down")) && rows.length > 0) {
         selectedIndex = Math.min(rows.length - 1, selectedIndex + 1);
         clearCache();
         tui.requestRender();
@@ -177,7 +177,7 @@ function createAccountPanelComponent(
         return;
       }
 
-      if (matchesKey(data, "enter") || matchesKey(data, "return")) {
+      if (data === "enter" || data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return")) {
         done({ action: "select", providerName: selectedRow.accountId });
         return;
       }
