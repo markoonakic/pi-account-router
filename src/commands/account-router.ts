@@ -305,7 +305,8 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
 
     if (action.action === "select") {
       host.pinAccount(action.providerName);
-      ctx.ui.notify(`Pinned ${action.providerName}`, "info");
+      const selectedAccount = accounts.find((account) => account.providerName === action.providerName);
+      ctx.ui.notify(`Pinned ${selectedAccount?.displayName ?? action.providerName}`, "info");
       return;
     }
 

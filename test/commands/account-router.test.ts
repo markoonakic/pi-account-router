@@ -664,7 +664,7 @@ describe("account-router command surface", () => {
 
     expect(ctx.ui.custom).toHaveBeenCalledWith(expect.any(Function));
     expect(host.pinAccount).toHaveBeenCalledWith("openai-codex-2");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Pinned openai-codex-2", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Pinned ChatGPT Codex #2", "info");
   });
 
   it("falls back to text output when UI is unavailable", async () => {

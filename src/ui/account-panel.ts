@@ -48,7 +48,7 @@ export interface AccountPanelShellModel {
 export const ACCOUNT_PANEL_TITLE = "Account Router";
 
 export const ACCOUNT_PANEL_HOTKEYS = [
-  { key: "enter", label: "use" },
+  { key: "enter", label: "pin" },
   { key: "r", label: "rename" },
   { key: "u", label: "refresh" },
   { key: "a", label: "add" },
