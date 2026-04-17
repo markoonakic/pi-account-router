@@ -34,6 +34,7 @@ export function installAccountRouter(
 ): void {
   const store = createRuntimeStore();
   let snapshots: Record<string, AccountSnapshot | undefined> = {};
+  let backgroundRefresh: Promise<AccountCatalogEntry[] | void> | undefined;
 
   function buildCatalog(): AccountCatalogEntry[] {
     const settings = loadAccountRouterSettings();
@@ -188,6 +189,18 @@ export function installAccountRouter(
     ctx.modelRegistry.refresh();
   }
 
+  function updateStatus(ctx: ExtensionContext, catalog: AccountCatalogEntry[]): void {
+    const settings = loadAccountRouterSettings(ctx.cwd);
+    ctx.ui.setStatus("account-router", settings.showFooter ? renderFooter(getFooterEntry(ctx, catalog)) : undefined);
+  }
+
+  function syncAccountsFromContext(ctx: ExtensionContext): AccountCatalogEntry[] {
+    store.bindModelRegistry(ctx.modelRegistry);
+    store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
+    refreshActiveSelections();
+    return buildCatalog();
+  }
+
   async function refreshFromContext(ctx: ExtensionContext): Promise<AccountCatalogEntry[]> {
     store.bindModelRegistry(ctx.modelRegistry);
     store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
@@ -212,14 +225,31 @@ export function installAccountRouter(
     });
 
     const catalog = buildCatalog();
-    const settings = loadAccountRouterSettings(ctx.cwd);
-    ctx.ui.setStatus("account-router", settings.showFooter ? renderFooter(getFooterEntry(ctx, catalog)) : undefined);
+    updateStatus(ctx, catalog);
     return catalog;
+  }
+
+  function scheduleBackgroundRefresh(ctx: ExtensionContext): void {
+    if (backgroundRefresh !== undefined) {
+      return;
+    }
+
+    backgroundRefresh = refreshFromContext(ctx)
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
+      })
+      .finally(() => {
+        backgroundRefresh = undefined;
+      });
   }
 
   registerAccountRouterCommand(pi, {
     async listAccounts(ctx: ExtensionCommandContext) {
-      return refreshFromContext(ctx);
+      const catalog = syncAccountsFromContext(ctx);
+      updateStatus(ctx, catalog);
+      scheduleBackgroundRefresh(ctx);
+      return catalog;
     },
     async addAccount(family: ProviderFamilyId, ctx: ExtensionCommandContext) {
       await addAccountAndLogin({
@@ -314,14 +344,23 @@ export function installAccountRouter(
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await refreshFromContext(ctx);
+    await refreshFromContext(ctx).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
+    });
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    await refreshFromContext(ctx);
+    await refreshFromContext(ctx).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
+    });
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    await refreshFromContext(ctx);
+    await refreshFromContext(ctx).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
+    });
   });
 }
