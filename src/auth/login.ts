@@ -27,7 +27,7 @@ async function openLoginInBrowser(
   pi: Pick<ExtensionAPI, "exec">,
   ctx: AddAccountAndLoginContext,
   url: string,
-): Promise<void> {
+): Promise<boolean> {
   let command: string;
   let args: string[];
 
@@ -44,12 +44,25 @@ async function openLoginInBrowser(
 
   try {
     await pi.exec(command, args);
+    return true;
   } catch {
     ctx.ui.notify("Could not open a browser automatically. Please open the login URL manually.", "warning");
+    return false;
   }
 }
 
-function notifyAuth(ctx: AddAccountAndLoginContext, info: OAuthAuthInfo): void {
+async function notifyAuth(
+  pi: Pick<ExtensionAPI, "exec">,
+  ctx: AddAccountAndLoginContext,
+  info: OAuthAuthInfo,
+): Promise<void> {
+  const opened = await openLoginInBrowser(pi, ctx, info.url);
+
+  if (opened) {
+    ctx.ui.notify(info.instructions ?? "A browser window should open. Complete login to finish.", "info");
+    return;
+  }
+
   const message = info.instructions ? `${info.instructions}\n${info.url}` : info.url;
   ctx.ui.notify(message, "info");
 }
@@ -74,6 +87,10 @@ async function promptForText(ctx: AddAccountAndLoginContext, prompt: OAuthPrompt
   return promptForRequiredInput(ctx, prompt.message, prompt.placeholder);
 }
 
+async function promptForManualCode(ctx: AddAccountAndLoginContext): Promise<string> {
+  return promptForRequiredInput(ctx, "Paste redirect URL below, or complete login in browser:");
+}
+
 export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Promise<string> {
   const aliasProviderName = getNextAliasProviderName(options.family, options.existingProviderNames);
   const doRegister = options.registerAliasProvider ?? registerAliasProvider;
@@ -82,10 +99,10 @@ export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Pr
 
   await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
     onAuth: (info) => {
-      void openLoginInBrowser(options.pi, options.ctx, info.url);
-      notifyAuth(options.ctx, info);
+      void notifyAuth(options.pi, options.ctx, info);
     },
     onPrompt: async (prompt) => promptForText(options.ctx, prompt),
+    onManualCodeInput: async () => promptForManualCode(options.ctx),
     onProgress: (message) => {
       options.ctx.ui.notify(message, "info");
     },
