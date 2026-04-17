@@ -14,6 +14,7 @@ export interface AccountRouterCommandHost {
   pinAccount(providerName: string): void;
   unpin(family?: ProviderFamilyId): void;
   refresh(ctx: ExtensionCommandContext): Promise<void>;
+  refreshAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   renameAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   showAccountDetails(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
   removeAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void>;
@@ -23,7 +24,7 @@ export interface AccountRouterCommandHost {
 
 type AccountPanelAction =
   | { action: "select"; providerName: string }
-  | { action: "refresh" }
+  | { action: "refresh"; providerName: string }
   | { action: "rename"; providerName: string }
   | { action: "details"; providerName: string }
   | { action: "add" }
@@ -191,8 +192,12 @@ function createAccountPanelComponent(
         return;
       }
 
+      const selectedRow = getSelectedRow();
+
       if (matchesKey(data, "u")) {
-        done({ action: "refresh" });
+        if (selectedRow !== undefined) {
+          done({ action: "refresh", providerName: selectedRow.accountId });
+        }
         return;
       }
 
@@ -201,7 +206,6 @@ function createAccountPanelComponent(
         return;
       }
 
-      const selectedRow = getSelectedRow();
       if (selectedRow === undefined) {
         return;
       }
@@ -311,6 +315,7 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
     }
 
     if (action.action === "refresh") {
+      await host.refreshAccount(action.providerName, ctx);
       accounts = await host.listAccounts(ctx);
       continue;
     }

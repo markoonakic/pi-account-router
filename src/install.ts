@@ -296,6 +296,9 @@ export function installAccountRouter(
     async refresh(ctx: ExtensionCommandContext) {
       await refreshFromContext(ctx);
     },
+    async refreshAccount(_providerName: string, ctx: ExtensionCommandContext) {
+      await refreshFromContext(ctx);
+    },
     async renameAccount(providerName: string, ctx: ExtensionCommandContext) {
       const currentLabel = buildCatalog().find((entry) => entry.providerName === providerName)?.label;
       const nextLabel = await promptForAccountRename(ctx.ui, { providerName, currentLabel });

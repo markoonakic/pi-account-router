@@ -11,6 +11,7 @@ function createHost(overrides: Partial<AccountRouterCommandHost> = {}): AccountR
     pinAccount: vi.fn(),
     unpin: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
+    refreshAccount: vi.fn().mockResolvedValue(undefined),
     renameAccount: vi.fn().mockResolvedValue(undefined),
     showAccountDetails: vi.fn().mockResolvedValue(undefined),
     removeAccount: vi.fn().mockResolvedValue(undefined),
@@ -494,7 +495,7 @@ describe("account-router command surface", () => {
         notify: vi.fn(),
         select: vi.fn(),
         custom: vi.fn()
-          .mockResolvedValueOnce({ action: "refresh" })
+          .mockResolvedValueOnce({ action: "refresh", providerName: "openai-codex-2" })
           .mockResolvedValueOnce(undefined),
       } as any,
     });
@@ -509,6 +510,7 @@ describe("account-router command surface", () => {
     await command.handler("", ctx);
 
     expect(host.refresh).not.toHaveBeenCalled();
+    expect(host.refreshAccount).toHaveBeenCalledWith("openai-codex-2", ctx);
     expect(listAccounts).toHaveBeenCalledTimes(2);
     expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
   });
