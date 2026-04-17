@@ -5,7 +5,7 @@ import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
 import { getApiProvider, type Api } from "@mariozechner/pi-ai";
 import { discoverAccounts } from "./auth/discovery.js";
-import { addAccountAndLogin } from "./auth/login.js";
+import { addAccountAndLogin, loginWithNativeLikeDialog } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "./config/store.js";
 import { getFamilyForProviderName } from "./providers/families.js";
@@ -163,33 +163,10 @@ export function installAccountRouter(
   }
 
   async function reauthenticateAccount(providerName: string, ctx: ExtensionCommandContext): Promise<void> {
-    await ctx.modelRegistry.authStorage.login(providerName, {
-      onAuth: ({ instructions, url }) => {
-        ctx.ui.notify(instructions ? `${instructions}\n${url}` : url, "info");
-      },
-      onPrompt: async (prompt) => {
-        const value = prompt.placeholder === undefined
-          ? await ctx.ui.input(prompt.message)
-          : await ctx.ui.input(prompt.message, prompt.placeholder);
-
-        if (value === undefined) {
-          throw new Error("Authentication input cancelled by user");
-        }
-
-        return value;
-      },
-      onManualCodeInput: async () => {
-        const value = await ctx.ui.input("Paste the authorization code or full redirect URL:");
-
-        if (value === undefined) {
-          throw new Error("Authentication input cancelled by user");
-        }
-
-        return value;
-      },
-      onProgress: (message) => {
-        ctx.ui.notify(message, "info");
-      },
+    await loginWithNativeLikeDialog({
+      providerName,
+      ctx,
+      pi,
     });
     ctx.modelRegistry.refresh();
   }

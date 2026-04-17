@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { initTheme } from "@mariozechner/pi-coding-agent";
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "../src/config/store.js";
 import { installAccountRouter } from "../src/install.js";
 
@@ -608,6 +609,7 @@ describe("installAccountRouter", () => {
   });
 
   it("dispatches reauth from the account details menu", async () => {
+    initTheme();
     const registerCommand = vi.fn();
     const pi = {
       registerCommand,
@@ -628,6 +630,24 @@ describe("installAccountRouter", () => {
         select: vi.fn().mockResolvedValue("Reauthenticate"),
         custom: vi.fn()
           .mockResolvedValueOnce({ action: "details", providerName: "openai-codex-2" })
+          .mockImplementationOnce(async (factory) => {
+            let doneValue: unknown;
+            let resolveDone!: (value: unknown) => void;
+            const donePromise = new Promise<unknown>((resolve) => {
+              resolveDone = resolve;
+            });
+            await factory(
+              { requestRender: vi.fn() },
+              { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+              {},
+              (value: unknown) => {
+                doneValue = value;
+                resolveDone(value);
+              },
+            );
+            await donePromise;
+            return doneValue;
+          })
           .mockResolvedValueOnce(undefined),
       },
     });
@@ -650,8 +670,10 @@ describe("installAccountRouter", () => {
         onPrompt: expect.any(Function),
         onManualCodeInput: expect.any(Function),
         onProgress: expect.any(Function),
+        signal: expect.any(Object),
       }),
     );
+    expect(interactiveCtx.ui.custom).toHaveBeenCalledTimes(3);
   });
 
   it("clears a label from the details menu and falls back to the account identity", async () => {

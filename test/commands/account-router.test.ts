@@ -231,6 +231,49 @@ describe("account-router command surface", () => {
     expect(lines).toContain("2 accounts · 1 codex · 1 anthropic · 1 needs reauth");
   });
 
+  it("shows add in the empty-state hint so the panel reflects the real keybinds", async () => {
+    const registerCommand = vi.fn();
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const host = createHost({
+      listAccounts: vi.fn().mockResolvedValue([]),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(panelFactory).toBeTypeOf("function");
+    if (panelFactory === undefined) {
+      return;
+    }
+
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+      {},
+      vi.fn(),
+    );
+    const lines = component.render(120);
+
+    expect(lines).toContain("u refresh • a add • esc close");
+  });
+
   it("uses a custom account panel for the default interactive path", async () => {
     const registerCommand = vi.fn();
     const account = {

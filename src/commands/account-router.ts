@@ -247,7 +247,7 @@ function createAccountPanelComponent(
       if (rows.length === 0) {
         addLine(theme.fg("warning", "No routed accounts discovered"));
         addLine();
-        addLine(theme.fg("dim", "u refresh • esc close"));
+        addLine(theme.fg("dim", "u refresh • a add • esc close"));
         cachedLines = lines;
         cachedWidth = width;
         return lines;
