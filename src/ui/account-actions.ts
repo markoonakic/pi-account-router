@@ -46,13 +46,18 @@ function firstNonEmpty(...values: Array<string | undefined>): string[] {
 export async function promptForAccountRename(
   ui: Pick<ExtensionUIContext, "input">,
   input: AccountRenamePromptInput,
-): Promise<string | undefined> {
+): Promise<string | null | undefined> {
   const placeholder = normalizeLabel(input.currentLabel);
   const value = placeholder === undefined
     ? await ui.input(`Rename ${input.providerName}`)
     : await ui.input(`Rename ${input.providerName}`, placeholder);
 
-  return normalizeLabel(value);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = normalizeLabel(value);
+  return normalized === undefined ? null : normalized;
 }
 
 export async function showAccountDetailsMenu(
@@ -60,7 +65,7 @@ export async function showAccountDetailsMenu(
   input: AccountDetailsMenuInput,
 ): Promise<AccountDetailsAction> {
   const title = firstNonEmpty(
-    `${input.displayName} · esc back`,
+    input.displayName,
     `Provider key: ${input.providerName}`,
     input.summary,
     ...(input.details ?? []),
@@ -87,7 +92,7 @@ export async function showAddAccountFamilyPicker(
   families: readonly AddAccountFamilyOption[],
 ): Promise<ProviderFamilyId | undefined> {
   const labels = families.map((family) => family.displayName);
-  const selection = await ui.select("Add account · esc back", labels);
+  const selection = await ui.select("Add account", labels);
   if (selection === undefined) {
     return undefined;
   }

@@ -292,7 +292,7 @@ export function installAccountRouter(
       await refreshFromContext(ctx);
     },
     async renameAccount(providerName: string, ctx: ExtensionCommandContext) {
-      const currentLabel = buildCatalog().find((entry) => entry.providerName === providerName)?.displayName;
+      const currentLabel = buildCatalog().find((entry) => entry.providerName === providerName)?.label;
       const nextLabel = await promptForAccountRename(ctx.ui, { providerName, currentLabel });
 
       if (nextLabel === undefined) {
@@ -300,12 +300,17 @@ export function installAccountRouter(
       }
 
       const settings = loadAccountRouterSettings(ctx.cwd);
+      const labels = { ...settings.labels };
+
+      if (nextLabel === null) {
+        delete labels[providerName];
+      } else {
+        labels[providerName] = nextLabel;
+      }
+
       saveAccountRouterSettings(ctx.cwd, {
         ...settings,
-        labels: {
-          ...settings.labels,
-          [providerName]: nextLabel,
-        },
+        labels,
       });
     },
     async showAccountDetails(providerName: string, ctx: ExtensionCommandContext) {

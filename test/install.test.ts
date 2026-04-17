@@ -392,7 +392,7 @@ describe("installAccountRouter", () => {
 
     await command.handler("", interactiveCtx);
 
-    expect(interactiveCtx.ui.input).toHaveBeenCalledWith(expect.stringMatching(/rename/i), expect.any(String));
+    expect(interactiveCtx.ui.input).toHaveBeenCalledWith(expect.stringMatching(/rename/i));
     expect(loadAccountRouterSettings({ agentDir }).labels).toEqual({
       "openai-codex-2": "Work Pro Codex",
     });
@@ -412,6 +412,71 @@ describe("installAccountRouter", () => {
     expect(laterRenderedText).not.toContain("openai-codex-2");
     expect(laterRenderedText).not.toContain("[usage]");
     expect(textCtx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+  });
+
+  it("clears an existing label and falls back to identity/provider text", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    stubCodexUsageFetchByToken({
+      "alias-access": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+    });
+    saveAccountRouterSettings({ agentDir }, {
+      labels: {
+        "openai-codex-2": "Work Pro Codex",
+      },
+    });
+
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const interactiveCtx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        input: vi.fn().mockResolvedValue("   "),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "rename", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", interactiveCtx);
+
+    expect(loadAccountRouterSettings({ agentDir }).labels).toEqual({});
+
+    const textCtx = createContext(modelRegistry, {
+      hasUI: false,
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await command.handler("", textCtx);
+
+    const laterRenderedText = (textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(laterRenderedText).toContain("work@example.com — ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
+    expect(laterRenderedText).not.toContain("Work Pro Codex");
   });
 
   it("feeds the footer with the human-first name instead of the raw provider key", async () => {
@@ -575,7 +640,7 @@ describe("installAccountRouter", () => {
     await command.handler("", interactiveCtx);
 
     expect(interactiveCtx.ui.select).toHaveBeenCalledWith(
-      expect.stringContaining("esc back"),
+      expect.not.stringContaining("esc back"),
       expect.arrayContaining(["Reauthenticate", "Remove account", "Show provider key"]),
     );
     expect(authStorage.login).toHaveBeenCalledWith(

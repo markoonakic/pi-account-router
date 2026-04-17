@@ -363,7 +363,7 @@ describe("account-router command surface", () => {
     await command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "Add account · esc back",
+      "Add account",
       expect.arrayContaining(["ChatGPT Plus/Pro (Codex)", "Anthropic (Claude Pro/Max)"]),
     );
     expect(host.addAccount).toHaveBeenCalledWith("openai-codex", ctx);
