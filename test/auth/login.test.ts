@@ -1,3 +1,4 @@
+import { initTheme } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderAdapter } from "../../src/adapters/types.js";
@@ -111,6 +112,86 @@ describe("addAccountAndLogin", () => {
       "login:openai-codex-3",
       "refresh",
     ]);
+  });
+
+  it("uses a native-like custom login dialog when custom UI is available", async () => {
+    initTheme();
+    const notify = vi.fn();
+    const refresh = vi.fn();
+    const authStorage = {
+      login: vi.fn(async (_providerName: string, callbacks: {
+        onAuth: (info: { url: string; instructions?: string }) => void;
+        onPrompt: (prompt: { message: string }) => Promise<string>;
+        onManualCodeInput?: () => Promise<string>;
+        onProgress?: (message: string) => void;
+      }) => {
+        callbacks.onAuth({ url: "https://auth.example/device", instructions: "Open browser" });
+        const manualValue = await callbacks.onManualCodeInput?.();
+        expect(manualValue).toBe("https://callback.example/?code=from-dialog");
+      }),
+    };
+
+    const custom = vi.fn(async (factory: any) => {
+      let doneValue: unknown;
+      let resolveDone!: (value: unknown) => void;
+      const donePromise = new Promise<unknown>((resolve) => {
+        resolveDone = resolve;
+      });
+      const component: any = await factory(
+        { requestRender: vi.fn() },
+        { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+        {},
+        (value: unknown) => {
+          doneValue = value;
+          resolveDone(value);
+        },
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      component.input.setValue("https://callback.example/?code=from-dialog");
+      component.input.onSubmit?.();
+      await donePromise;
+      return doneValue;
+    });
+
+    await expect(
+      addAccountAndLogin({
+        family: "openai-codex",
+        existingProviderNames: ["openai-codex"],
+        adapter: {
+          family: "openai-codex",
+          displayName: "ChatGPT Plus/Pro (Codex)",
+          capabilities: { usage: true, silentFailover: true, nativeLogin: true, reauth: true, experimental: false },
+          buildAliasOAuth: vi.fn(() => ({
+            name: "ChatGPT Plus/Pro (Codex) #2",
+            async login() {
+              return { access: "a", refresh: "r", expires: Date.now() + 60_000 };
+            },
+            async refreshToken(credentials: unknown) {
+              return credentials;
+            },
+            getApiKey() {
+              return "token";
+            },
+          })),
+        },
+        registerAliasProvider: vi.fn(async () => {}),
+        ctx: {
+          modelRegistry: {
+            authStorage,
+            refresh,
+            getAll: vi.fn(() => []),
+            getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
+          },
+          ui: { notify, input: vi.fn(), custom: custom as any },
+        },
+        pi: { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) },
+      }),
+    ).resolves.toBe("openai-codex-2");
+
+    expect(custom).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalledWith("Open browser", "info");
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to notifying the full URL when the browser cannot be opened automatically", async () => {

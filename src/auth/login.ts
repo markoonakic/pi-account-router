@@ -1,4 +1,4 @@
-import type { AuthStorage, ExtensionAPI, ExtensionUIContext, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { LoginDialogComponent, type AuthStorage, type ExtensionAPI, type ExtensionUIContext, type ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { OAuthAuthInfo, OAuthPrompt } from "@mariozechner/pi-ai";
 
 import type { ProviderAdapter, ProviderFamilyId } from "../adapters/types.js";
@@ -11,7 +11,7 @@ export interface AddAccountAndLoginContext {
     authStorage: Pick<AuthStorage, "login">;
     refresh: ModelRegistry["refresh"];
   };
-  ui: Pick<ExtensionUIContext, "notify" | "input">;
+  ui: Pick<ExtensionUIContext, "notify" | "input"> & Partial<Pick<ExtensionUIContext, "custom">>;
 }
 
 export interface AddAccountAndLoginOptions {
@@ -91,12 +91,7 @@ async function promptForManualCode(ctx: AddAccountAndLoginContext): Promise<stri
   return promptForRequiredInput(ctx, "Paste redirect URL below, or complete login in browser:");
 }
 
-export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Promise<string> {
-  const aliasProviderName = getNextAliasProviderName(options.family, options.existingProviderNames);
-  const doRegister = options.registerAliasProvider ?? registerAliasProvider;
-
-  await doRegister(options.pi, options.ctx.modelRegistry, options.adapter, aliasProviderName);
-
+async function loginWithFallbackPrompts(options: AddAccountAndLoginOptions, aliasProviderName: string): Promise<void> {
   await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
     onAuth: (info) => {
       void notifyAuth(options.pi, options.ctx, info);
@@ -107,7 +102,87 @@ export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Pr
       options.ctx.ui.notify(message, "info");
     },
   });
+}
 
+async function loginWithNativeLikeDialog(options: AddAccountAndLoginOptions, aliasProviderName: string): Promise<void> {
+  if (typeof options.ctx.ui.custom !== "function") {
+    await loginWithFallbackPrompts(options, aliasProviderName);
+    return;
+  }
+
+  const result = await options.ctx.ui.custom<{ success: boolean; error?: string } | undefined>((tui, _theme, _keybindings, done) => {
+    let settled = false;
+    let manualCodeResolve: ((value: string) => void) | undefined;
+    let manualCodeReject: ((error: Error) => void) | undefined;
+    const manualCodePromise = new Promise<string>((resolve, reject) => {
+      manualCodeResolve = resolve;
+      manualCodeReject = reject;
+    });
+
+    const dialog = new LoginDialogComponent(tui, aliasProviderName, (_success, message) => {
+      if (!settled) {
+        settled = true;
+        done({ success: false, error: message ?? "Login cancelled" });
+      }
+    });
+
+    void (async () => {
+      try {
+        await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
+          onAuth: (info) => {
+            dialog.showAuth(info.url, info.instructions);
+            void openLoginInBrowser(options.pi, options.ctx, info.url);
+            void dialog.showManualInput("Paste redirect URL below, or complete login in browser:")
+              .then((value) => {
+                if (value && manualCodeResolve) {
+                  manualCodeResolve(value);
+                  manualCodeResolve = undefined;
+                  manualCodeReject = undefined;
+                }
+              })
+              .catch(() => {
+                if (manualCodeReject) {
+                  manualCodeReject(new Error("Authentication input cancelled by user"));
+                  manualCodeResolve = undefined;
+                  manualCodeReject = undefined;
+                }
+              });
+          },
+          onPrompt: async (prompt) => dialog.showPrompt(prompt.message, prompt.placeholder),
+          onProgress: (message) => {
+            dialog.showProgress(message);
+          },
+          onManualCodeInput: () => manualCodePromise,
+          signal: dialog.signal,
+        });
+
+        if (!settled) {
+          settled = true;
+          done({ success: true });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!settled) {
+          settled = true;
+          done({ success: false, error: message });
+        }
+      }
+    })();
+
+    return dialog;
+  });
+
+  if (!result?.success) {
+    throw new Error(result?.error ?? "Login cancelled");
+  }
+}
+
+export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Promise<string> {
+  const aliasProviderName = getNextAliasProviderName(options.family, options.existingProviderNames);
+  const doRegister = options.registerAliasProvider ?? registerAliasProvider;
+
+  await doRegister(options.pi, options.ctx.modelRegistry, options.adapter, aliasProviderName);
+  await loginWithNativeLikeDialog(options, aliasProviderName);
   options.ctx.modelRegistry.refresh();
   return aliasProviderName;
 }

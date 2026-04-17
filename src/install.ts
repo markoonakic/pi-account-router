@@ -263,6 +263,9 @@ export function installAccountRouter(
         await refreshFromContext(ctx);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (message === "Login cancelled" || message === "Authentication input cancelled by user") {
+          return;
+        }
         ctx.ui.notify(`Failed to add account: ${message}`, "error");
       }
     },

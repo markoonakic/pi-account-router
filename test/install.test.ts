@@ -294,6 +294,7 @@ describe("installAccountRouter", () => {
         select: vi.fn().mockResolvedValue("ChatGPT Plus/Pro (Codex)"),
         custom: vi.fn()
           .mockResolvedValueOnce({ action: "add" })
+          .mockResolvedValueOnce({ success: false, error: "OpenAI auth failed" })
           .mockResolvedValueOnce(undefined),
       },
     });
@@ -309,7 +310,43 @@ describe("installAccountRouter", () => {
       expect.stringMatching(/Failed to add account:/),
       "error",
     );
-    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns to the router panel when the add-account login dialog is cancelled", async () => {
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+      exec: vi.fn().mockResolvedValue(undefined),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({});
+    const modelRegistry = createModelRegistry(authStorage);
+    const listAccounts = vi.fn().mockResolvedValue([]);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue("ChatGPT Plus/Pro (Codex)"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "add" })
+          .mockResolvedValueOnce({ success: false, error: "Authentication input cancelled by user" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await expect(command.handler("", ctx)).resolves.toBeUndefined();
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringMatching(/Failed to add account:/), "error");
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
   });
 
   it("persists a renamed label and uses it in later account rendering", async () => {
