@@ -4,12 +4,11 @@ import type { ProviderAdapter } from "../../src/adapters/types.js";
 import { addAccountAndLogin } from "../../src/auth/login.js";
 
 describe("addAccountAndLogin", () => {
-  it("allocates the next alias, registers it, launches login, and refreshes the registry after login", async () => {
+  it("allocates the next alias, registers it, launches login, opens the browser, and refreshes the registry after login", async () => {
     const lifecycle: string[] = [];
     const notify = vi.fn();
     const input = vi.fn()
-      .mockResolvedValueOnce("https://callback.example/?code=from-prompt")
-      .mockResolvedValueOnce("manual-code");
+      .mockResolvedValueOnce("https://callback.example/?code=from-prompt");
     const refresh = vi.fn(() => {
       lifecycle.push("refresh");
     });
@@ -18,7 +17,6 @@ describe("addAccountAndLogin", () => {
       login: vi.fn(async (providerName: string, callbacks: {
         onAuth: (info: { url: string; instructions?: string }) => void;
         onPrompt: (prompt: { message: string }) => Promise<string>;
-        onManualCodeInput?: () => Promise<string>;
         onProgress?: (message: string) => void;
       }) => {
         lifecycle.push(`login:${providerName}`);
@@ -29,10 +27,8 @@ describe("addAccountAndLogin", () => {
         callbacks.onProgress?.("Waiting for authentication to complete...");
 
         const promptValue = await callbacks.onPrompt({ message: "Paste the callback URL:" });
-        const manualCode = await callbacks.onManualCodeInput?.();
 
         expect(promptValue).toBe("https://callback.example/?code=from-prompt");
-        expect(manualCode).toBe("manual-code");
       }),
     };
 
@@ -49,7 +45,7 @@ describe("addAccountAndLogin", () => {
         input,
       },
     };
-    const pi = { registerProvider: vi.fn() };
+    const pi = { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) };
     const adapter: ProviderAdapter = {
       family: "openai-codex",
       displayName: "ChatGPT Plus/Pro (Codex)",
@@ -95,12 +91,12 @@ describe("addAccountAndLogin", () => {
       expect.objectContaining({
         onAuth: expect.any(Function),
         onPrompt: expect.any(Function),
-        onManualCodeInput: expect.any(Function),
         onProgress: expect.any(Function),
       }),
     );
+    expect(authStorage.login.mock.calls[0]?.[1]).not.toHaveProperty("onManualCodeInput");
+    expect(pi.exec).toHaveBeenCalled();
     expect(input).toHaveBeenNthCalledWith(1, "Paste the callback URL:");
-    expect(input).toHaveBeenNthCalledWith(2, "Paste the authorization code or full redirect URL:");
     expect(notify).toHaveBeenNthCalledWith(
       1,
       "Enter the device code shown in your browser.\nhttps://auth.example/device",
@@ -159,7 +155,7 @@ describe("addAccountAndLogin", () => {
         },
         ui: { notify, input },
       },
-      pi: { registerProvider: vi.fn() },
+      pi: { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) },
     });
 
     expect(notify).toHaveBeenCalledWith("https://auth.example/device", "info");
@@ -205,19 +201,21 @@ describe("addAccountAndLogin", () => {
           },
           ui: { notify: vi.fn(), input: vi.fn().mockResolvedValue(undefined) },
         },
-        pi: { registerProvider: vi.fn() },
+        pi: { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) },
       }),
     ).rejects.toThrow("Authentication input cancelled by user");
   });
 
-  it("throws a clear error when the user cancels manual code input", async () => {
+  it("warns and continues when the browser cannot be opened automatically", async () => {
+    const notify = vi.fn();
+    const input = vi.fn().mockResolvedValue("https://callback.example/?code=from-prompt");
     const authStorage = {
       login: vi.fn(async (_providerName: string, callbacks: {
+        onAuth: (info: { url: string; instructions?: string }) => void;
         onPrompt: (prompt: { message: string }) => Promise<string>;
-        onManualCodeInput?: () => Promise<string>;
       }) => {
+        callbacks.onAuth({ url: "https://auth.example/device", instructions: "Open browser" });
         await callbacks.onPrompt({ message: "Paste the callback URL:" });
-        await callbacks.onManualCodeInput?.();
       }),
     };
 
@@ -250,13 +248,12 @@ describe("addAccountAndLogin", () => {
             getAll: vi.fn(() => []),
             getApiKeyAndHeaders: vi.fn(async () => ({ ok: false })),
           },
-          ui: {
-            notify: vi.fn(),
-            input: vi.fn().mockResolvedValueOnce("https://callback.example/?code=from-prompt").mockResolvedValueOnce(undefined),
-          },
+          ui: { notify, input },
         },
-        pi: { registerProvider: vi.fn() },
+        pi: { registerProvider: vi.fn(), exec: vi.fn().mockRejectedValue(new Error("no browser")) },
       }),
-    ).rejects.toThrow("Authentication input cancelled by user");
+    ).resolves.toBe("openai-codex-2");
+
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/Could not open a browser automatically/i), "warning");
   });
 });

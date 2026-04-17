@@ -20,7 +20,33 @@ export interface AddAccountAndLoginOptions {
   adapter: ProviderAdapter;
   registerAliasProvider?: typeof registerAliasProvider;
   ctx: AddAccountAndLoginContext;
-  pi: Pick<ExtensionAPI, "registerProvider">;
+  pi: Pick<ExtensionAPI, "registerProvider" | "exec">;
+}
+
+async function openLoginInBrowser(
+  pi: Pick<ExtensionAPI, "exec">,
+  ctx: AddAccountAndLoginContext,
+  url: string,
+): Promise<void> {
+  let command: string;
+  let args: string[];
+
+  if (process.platform === "darwin") {
+    command = "open";
+    args = [url];
+  } else if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    command = "xdg-open";
+    args = [url];
+  }
+
+  try {
+    await pi.exec(command, args);
+  } catch {
+    ctx.ui.notify("Could not open a browser automatically. Please open the login URL manually.", "warning");
+  }
 }
 
 function notifyAuth(ctx: AddAccountAndLoginContext, info: OAuthAuthInfo): void {
@@ -48,10 +74,6 @@ async function promptForText(ctx: AddAccountAndLoginContext, prompt: OAuthPrompt
   return promptForRequiredInput(ctx, prompt.message, prompt.placeholder);
 }
 
-async function promptForManualCode(ctx: AddAccountAndLoginContext): Promise<string> {
-  return promptForRequiredInput(ctx, "Paste the authorization code or full redirect URL:");
-}
-
 export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Promise<string> {
   const aliasProviderName = getNextAliasProviderName(options.family, options.existingProviderNames);
   const doRegister = options.registerAliasProvider ?? registerAliasProvider;
@@ -60,10 +82,10 @@ export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Pr
 
   await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
     onAuth: (info) => {
+      void openLoginInBrowser(options.pi, options.ctx, info.url);
       notifyAuth(options.ctx, info);
     },
     onPrompt: async (prompt) => promptForText(options.ctx, prompt),
-    onManualCodeInput: async () => promptForManualCode(options.ctx),
     onProgress: (message) => {
       options.ctx.ui.notify(message, "info");
     },

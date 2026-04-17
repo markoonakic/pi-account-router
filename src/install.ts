@@ -30,7 +30,7 @@ function getCapabilityBadges(family: ProviderFamilyId): string[] {
 }
 
 export function installAccountRouter(
-  pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on">,
+  pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on" | "exec">,
 ): void {
   const store = createRuntimeStore();
   let snapshots: Record<string, AccountSnapshot | undefined> = {};
