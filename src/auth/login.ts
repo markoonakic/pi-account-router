@@ -91,8 +91,16 @@ async function promptForManualCode(ctx: AddAccountAndLoginContext): Promise<stri
   return promptForRequiredInput(ctx, "Paste redirect URL below, or complete login in browser:");
 }
 
-async function loginWithFallbackPrompts(options: AddAccountAndLoginOptions, aliasProviderName: string): Promise<void> {
-  await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
+type NativeLikeLoginContext = AddAccountAndLoginContext;
+
+type NativeLikeLoginOptions = {
+  providerName: string;
+  ctx: NativeLikeLoginContext;
+  pi: Pick<ExtensionAPI, "exec">;
+};
+
+async function loginWithFallbackPrompts(options: NativeLikeLoginOptions): Promise<void> {
+  await options.ctx.modelRegistry.authStorage.login(options.providerName, {
     onAuth: (info) => {
       void notifyAuth(options.pi, options.ctx, info);
     },
@@ -104,9 +112,9 @@ async function loginWithFallbackPrompts(options: AddAccountAndLoginOptions, alia
   });
 }
 
-async function loginWithNativeLikeDialog(options: AddAccountAndLoginOptions, aliasProviderName: string): Promise<void> {
+export async function loginWithNativeLikeDialog(options: NativeLikeLoginOptions): Promise<void> {
   if (typeof options.ctx.ui.custom !== "function") {
-    await loginWithFallbackPrompts(options, aliasProviderName);
+    await loginWithFallbackPrompts(options);
     return;
   }
 
@@ -119,7 +127,7 @@ async function loginWithNativeLikeDialog(options: AddAccountAndLoginOptions, ali
       manualCodeReject = reject;
     });
 
-    const dialog = new LoginDialogComponent(tui, aliasProviderName, (_success, message) => {
+    const dialog = new LoginDialogComponent(tui, options.providerName, (_success, message) => {
       if (!settled) {
         settled = true;
         done({ success: false, error: message ?? "Login cancelled" });
@@ -128,7 +136,7 @@ async function loginWithNativeLikeDialog(options: AddAccountAndLoginOptions, ali
 
     void (async () => {
       try {
-        await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
+        await options.ctx.modelRegistry.authStorage.login(options.providerName, {
           onAuth: (info) => {
             dialog.showAuth(info.url, info.instructions);
             void dialog.showManualInput("Paste redirect URL below, or complete login in browser:")
@@ -181,7 +189,11 @@ export async function addAccountAndLogin(options: AddAccountAndLoginOptions): Pr
   const doRegister = options.registerAliasProvider ?? registerAliasProvider;
 
   await doRegister(options.pi, options.ctx.modelRegistry, options.adapter, aliasProviderName);
-  await loginWithNativeLikeDialog(options, aliasProviderName);
+  await loginWithNativeLikeDialog({
+    providerName: aliasProviderName,
+    ctx: options.ctx,
+    pi: options.pi,
+  });
   options.ctx.modelRegistry.refresh();
   return aliasProviderName;
 }
