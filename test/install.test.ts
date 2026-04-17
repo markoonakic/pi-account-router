@@ -273,6 +273,45 @@ describe("installAccountRouter", () => {
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("account-router", expect.any(String));
   });
 
+  it("keeps the session responsive when add-account login fails", async () => {
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+      exec: vi.fn().mockResolvedValue(undefined),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({});
+    authStorage.login.mockRejectedValue(new Error("OpenAI auth failed"));
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        select: vi.fn().mockResolvedValue("ChatGPT Plus/Pro (Codex)"),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "add" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await expect(command.handler("", ctx)).resolves.toBeUndefined();
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/Failed to add account:/),
+      "error",
+    );
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+  });
+
   it("persists a renamed label and uses it in later account rendering", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
     tempDirs.push(agentDir);

@@ -252,14 +252,19 @@ export function installAccountRouter(
       return catalog;
     },
     async addAccount(family: ProviderFamilyId, ctx: ExtensionCommandContext) {
-      await addAccountAndLogin({
-        family,
-        existingProviderNames: store.getAccounts().map((account) => account.providerName),
-        adapter: ADAPTERS[family],
-        ctx,
-        pi,
-      });
-      await refreshFromContext(ctx);
+      try {
+        await addAccountAndLogin({
+          family,
+          existingProviderNames: store.getAccounts().map((account) => account.providerName),
+          adapter: ADAPTERS[family],
+          ctx,
+          pi,
+        });
+        await refreshFromContext(ctx);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Failed to add account: ${message}`, "error");
+      }
     },
     pinAccount(providerName: string) {
       const account = store.getAccounts().find((entry) => entry.providerName === providerName);
