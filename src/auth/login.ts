@@ -131,7 +131,6 @@ async function loginWithNativeLikeDialog(options: AddAccountAndLoginOptions, ali
         await options.ctx.modelRegistry.authStorage.login(aliasProviderName, {
           onAuth: (info) => {
             dialog.showAuth(info.url, info.instructions);
-            void openLoginInBrowser(options.pi, options.ctx, info.url);
             void dialog.showManualInput("Paste redirect URL below, or complete login in browser:")
               .then((value) => {
                 if (value && manualCodeResolve) {

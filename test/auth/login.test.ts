@@ -153,6 +153,7 @@ describe("addAccountAndLogin", () => {
       await donePromise;
       return doneValue;
     });
+    const pi = { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) };
 
     await expect(
       addAccountAndLogin({
@@ -185,12 +186,13 @@ describe("addAccountAndLogin", () => {
           },
           ui: { notify, input: vi.fn(), custom: custom as any },
         },
-        pi: { registerProvider: vi.fn(), exec: vi.fn().mockResolvedValue(undefined) },
+        pi,
       }),
     ).resolves.toBe("openai-codex-2");
 
     expect(custom).toHaveBeenCalledTimes(1);
     expect(notify).not.toHaveBeenCalledWith("Open browser", "info");
+    expect(pi.exec).not.toHaveBeenCalled();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
