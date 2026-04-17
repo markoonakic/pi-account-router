@@ -65,8 +65,7 @@ export async function showAccountDetailsMenu(
   input: AccountDetailsMenuInput,
 ): Promise<AccountDetailsAction> {
   const title = firstNonEmpty(
-    input.displayName,
-    `Provider key: ${input.providerName}`,
+    `${input.displayName} · esc back`,
     input.summary,
     ...(input.details ?? []),
   ).join("\n");
@@ -92,7 +91,7 @@ export async function showAddAccountFamilyPicker(
   families: readonly AddAccountFamilyOption[],
 ): Promise<ProviderFamilyId | undefined> {
   const labels = families.map((family) => family.displayName);
-  const selection = await ui.select("Add account", labels);
+  const selection = await ui.select("Add account · esc back", labels);
   if (selection === undefined) {
     return undefined;
   }

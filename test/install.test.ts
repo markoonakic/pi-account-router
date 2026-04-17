@@ -640,7 +640,7 @@ describe("installAccountRouter", () => {
     await command.handler("", interactiveCtx);
 
     expect(interactiveCtx.ui.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("esc back"),
+      expect.stringContaining("esc back"),
       expect.arrayContaining(["Reauthenticate", "Remove account", "Show provider key"]),
     );
     expect(authStorage.login).toHaveBeenCalledWith(

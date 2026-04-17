@@ -164,6 +164,72 @@ describe("account-router command surface", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Unknown subcommand: unknown", "error");
   });
 
+  it("shows a ghost summary that includes family counts and reauth state", async () => {
+    const registerCommand = vi.fn();
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const host = createHost({
+      listAccounts: vi.fn().mockResolvedValue([
+        {
+          providerName: "openai-codex-2",
+          displayName: "Work Pro Codex",
+          providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+          active: true,
+          pinned: true,
+          exhausted: false,
+          needsReauth: false,
+          summary: "5h left 80% | 7d left 65%",
+          badges: ["usage"],
+        },
+        {
+          providerName: "anthropic",
+          displayName: "Anthropic (Claude Pro/Max)",
+          providerDisplayName: "Anthropic (Claude Pro/Max)",
+          active: false,
+          pinned: false,
+          exhausted: false,
+          needsReauth: true,
+          summary: "",
+          badges: [],
+        },
+      ]),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(panelFactory).toBeTypeOf("function");
+    if (panelFactory === undefined) {
+      return;
+    }
+
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+      {},
+      vi.fn(),
+    );
+    const lines = component.render(120);
+
+    expect(lines).toContain("2 accounts · 1 codex · 1 anthropic · 1 needs reauth");
+  });
+
   it("uses a custom account panel for the default interactive path", async () => {
     const registerCommand = vi.fn();
     const account = {
@@ -363,7 +429,7 @@ describe("account-router command surface", () => {
     await command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "Add account",
+      expect.stringContaining("esc back"),
       expect.arrayContaining(["ChatGPT Plus/Pro (Codex)", "Anthropic (Claude Pro/Max)"]),
     );
     expect(host.addAccount).toHaveBeenCalledWith("openai-codex", ctx);

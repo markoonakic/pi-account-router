@@ -18,7 +18,7 @@ describe("account action helpers", () => {
     ).resolves.toBe("openai-codex");
 
     expect(select).toHaveBeenCalledWith(
-      "Add account",
+      expect.stringContaining("esc back"),
       [
         "ChatGPT Plus/Pro (Codex)",
         "Anthropic (Claude Pro/Max)",
@@ -39,7 +39,7 @@ describe("account action helpers", () => {
     ).resolves.toBe("show-provider-key");
 
     expect(select).toHaveBeenCalledWith(
-      expect.not.stringContaining("esc back"),
+      expect.stringContaining("esc back"),
       ["Reauthenticate", "Remove account", "Show provider key"],
     );
   });

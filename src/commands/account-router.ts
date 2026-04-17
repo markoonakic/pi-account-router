@@ -59,13 +59,42 @@ function getPanelGhostSummary(accounts: readonly FooterAccountEntry[]): string {
     return "No routed accounts discovered";
   }
 
-  const activeCount = accounts.filter((account) => account.active).length;
-  const attentionCount = accounts.filter((account) => account.exhausted || account.needsReauth).length;
+  const familyCounts = new Map<string, number>();
+  let needsReauthCount = 0;
+
+  for (const account of accounts) {
+    const family = getFamilyForProviderName(account.providerName) ?? account.providerName;
+    familyCounts.set(family, (familyCounts.get(family) ?? 0) + 1);
+
+    if (account.needsReauth) {
+      needsReauthCount += 1;
+    }
+  }
+
+  const familyBits = (Object.keys(FAMILY_DEFS) as ProviderFamilyId[])
+    .map((family) => {
+      const count = familyCounts.get(family);
+      if (!count) {
+        return undefined;
+      }
+
+      const label = family === "openai-codex"
+        ? "codex"
+        : family === "github-copilot"
+          ? "copilot"
+          : family === "google-gemini-cli"
+            ? "gemini"
+            : family === "google-antigravity"
+              ? "antigravity"
+              : family;
+      return `${count} ${label}`;
+    })
+    .filter((value): value is string => value !== undefined);
 
   return [
     `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}`,
-    `${activeCount} active`,
-    attentionCount > 0 ? `${attentionCount} need attention` : undefined,
+    ...familyBits,
+    needsReauthCount > 0 ? `${needsReauthCount} needs reauth` : undefined,
   ]
     .filter((value): value is string => value !== undefined)
     .join(" · ");
