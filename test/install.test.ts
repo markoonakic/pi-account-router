@@ -142,6 +142,53 @@ function createContext(modelRegistry: ReturnType<typeof createModelRegistry>, ov
 }
 
 describe("installAccountRouter", () => {
+  it("pre-registers discovered alias providers during install so session model restore can find them", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    writeFileSync(
+      join(agentDir, "auth.json"),
+      `${JSON.stringify({
+        "openai-codex-5": { type: "oauth", access: "a5", refresh: "r5", expires: 4_102_444_800_000 },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      join(agentDir, "models.json"),
+      `${JSON.stringify({
+        providers: {
+          "openai-codex": {
+            modelOverrides: {
+              "gpt-5.4": {
+                contextWindow: 1_050_000,
+              },
+            },
+          },
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const registerProvider = vi.fn();
+    const pi = {
+      registerCommand: vi.fn(),
+      registerProvider,
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    expect(registerProvider).toHaveBeenCalledWith(
+      "openai-codex-5",
+      expect.objectContaining({
+        api: "openai-codex-responses",
+        models: expect.arrayContaining([
+          expect.objectContaining({ id: "gpt-5.4", contextWindow: 1_050_000 }),
+        ]),
+      }),
+    );
+  });
+
   it("opens the account panel immediately without waiting for slow usage refreshes", async () => {
     const deferred = createDeferred<{ ok: boolean; json: () => Promise<unknown> }>();
     vi.stubGlobal("fetch", vi.fn(() => deferred.promise));

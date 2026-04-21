@@ -1,9 +1,10 @@
-import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, ModelRegistry, type ExtensionAPI, type ExtensionContext, type ExtensionCommandContext, type ProviderConfig } from "@mariozechner/pi-coding-agent";
 
 import { buildAccountCatalog, type AccountCatalogEntry } from "./accounts/catalog.js";
 import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
 import { getApiProvider, type Api } from "@mariozechner/pi-ai";
+import { join } from "node:path";
 import { discoverAccounts } from "./auth/discovery.js";
 import { addAccountAndLogin, loginWithNativeLikeDialog } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
@@ -11,6 +12,7 @@ import { loadAccountRouterSnapshotCache, saveAccountRouterSnapshotCache } from "
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "./config/store.js";
 import { getFamilyForProviderName } from "./providers/families.js";
 import { syncProviders } from "./providers/register.js";
+import { getLiveProviderModels } from "./models/live-registry.js";
 import { selectAccountForFamily } from "./routing/router.js";
 import { createFamilyRouterStream } from "./routing/stream.js";
 import { createRuntimeStore } from "./runtime/store.js";
@@ -78,9 +80,57 @@ function mergeSnapshot(
   };
 }
 
+function getAgentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME ?? process.cwd(), ".pi", "agent");
+}
+
+function cloneStartupProviderModels(sourceProvider: string, targetProvider: string, modelRegistry: ModelRegistry) {
+  return getLiveProviderModels(modelRegistry, sourceProvider).map((model) => ({
+    id: model.id,
+    name: model.name,
+    api: model.api,
+    reasoning: model.reasoning,
+    input: [...model.input],
+    cost: { ...model.cost },
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    ...(model.headers === undefined ? {} : { headers: { ...model.headers } }),
+    ...(model.compat === undefined ? {} : { compat: structuredClone(model.compat) }),
+  }));
+}
+
+function preRegisterAliasProvidersForSessionRestore(
+  pi: Pick<ExtensionAPI, "registerProvider">,
+): void {
+  try {
+    const agentDir = getAgentDir();
+    const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+    const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+    const discoveredAliases = discoverAccounts(authStorage).filter((account) => account.aliasIndex > 1);
+
+    for (const account of discoveredAliases) {
+      const sourceModels = getLiveProviderModels(modelRegistry, account.family);
+      const firstModel = sourceModels[0];
+      if (!firstModel) {
+        continue;
+      }
+
+      pi.registerProvider(account.providerName, {
+        baseUrl: firstModel.baseUrl,
+        api: firstModel.api,
+        models: cloneStartupProviderModels(account.family, account.providerName, modelRegistry),
+        oauth: ADAPTERS[account.family].buildAliasOAuth(account.aliasIndex) as NonNullable<ProviderConfig["oauth"]>,
+      });
+    }
+  } catch {
+    // Startup pre-registration is best-effort. Regular session refresh still repairs runtime registration later.
+  }
+}
+
 export function installAccountRouter(
   pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on" | "exec">,
 ): void {
+  preRegisterAliasProvidersForSessionRestore(pi);
   const store = createRuntimeStore();
   let snapshots: Record<string, AccountSnapshot | undefined> = loadAccountRouterSnapshotCache().snapshots;
   
