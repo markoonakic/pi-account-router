@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initTheme } from "@mariozechner/pi-coding-agent";
+import { ADAPTERS } from "../src/adapters/index.js";
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "../src/config/store.js";
 import { installAccountRouter } from "../src/install.js";
 
@@ -40,6 +41,10 @@ function createAuthStorage(initial: Record<string, unknown>) {
   return {
     getAll: () => Object.fromEntries(records),
     get: (providerName: string) => records.get(providerName),
+    getApiKey: vi.fn(async (providerName: string) => {
+      const credential = records.get(providerName) as { access?: string } | undefined;
+      return typeof credential?.access === "string" ? credential.access : undefined;
+    }),
     login: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn((providerName: string) => {
       records.delete(providerName);
@@ -308,6 +313,257 @@ describe("installAccountRouter", () => {
       }),
     });
 
+    await commandPromise;
+  });
+
+  it("refreshes expired alias snapshot auth through the adapter before falling back to a generic provider label", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+
+    const fetchMock = vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      const token = init?.headers?.Authorization?.replace(/^Bearer\s+/, "");
+      if (token === "fresh-access") {
+        return {
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            email: "work@example.com",
+            rate_limit: {
+              primary_window: {
+                used_percent: 20,
+                limit_window_seconds: FIVE_HOURS,
+                reset_at: 4_102_444_800,
+              },
+              secondary_window: {
+                used_percent: 35,
+                limit_window_seconds: SEVEN_DAYS,
+                reset_at: 4_102_444_800,
+              },
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: false,
+        json: vi.fn().mockResolvedValue({
+          error: { code: "token_expired" },
+        }),
+        text: vi.fn().mockResolvedValue('{"error":{"code":"token_expired"}}'),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const originalBuildAliasOAuth = ADAPTERS["openai-codex"].buildAliasOAuth;
+    ADAPTERS["openai-codex"].buildAliasOAuth = vi.fn((_index: number) => ({
+      name: "ChatGPT Codex #2",
+      async login() {
+        return { access: "fresh-access", refresh: "fresh-refresh", expires: Date.now() + 60_000 };
+      },
+      async refreshToken(credentials: unknown) {
+        const existing = credentials as { accountId?: string };
+        return {
+          access: "fresh-access",
+          refresh: "fresh-refresh",
+          expires: Date.now() + 60_000,
+          ...(existing.accountId === undefined ? {} : { accountId: existing.accountId }),
+        };
+      },
+      getApiKey(credentials: unknown) {
+        return (credentials as { access: string }).access;
+      },
+    })) as any;
+
+    try {
+      const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+      const registerCommand = vi.fn();
+      const pi = {
+        registerCommand,
+        registerProvider: vi.fn(),
+        on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+          handlers.set(event, handler);
+        }),
+      };
+
+      installAccountRouter(pi as any);
+
+      const authStorage = createAuthStorage({
+        "openai-codex-2": { type: "oauth", access: "expired-access", refresh: "r2", expires: 0, accountId: "acct_123" },
+      });
+      const modelRegistry = createModelRegistry(authStorage);
+      const ctx = createContext(modelRegistry, {
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      });
+
+      await handlers.get("session_start")?.({}, ctx);
+
+      const [, command] = registerCommand.mock.calls[0] as [
+        string,
+        { handler: (args: string, ctx: any) => Promise<void> },
+      ];
+      const textCtx = createContext(modelRegistry, {
+        hasUI: false,
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      });
+
+      await command.handler("status", textCtx);
+
+      expect(ADAPTERS["openai-codex"].buildAliasOAuth).toHaveBeenCalledWith(2);
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer fresh-access",
+            "chatgpt-account-id": "acct_123",
+          }),
+        }),
+      );
+      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toContain("work@example.com");
+      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).not.toContain("openai-codex-2");
+    } finally {
+      ADAPTERS["openai-codex"].buildAliasOAuth = originalBuildAliasOAuth;
+    }
+  });
+
+  it("keeps the last known snapshot identity when refresh cannot fetch fresh usage data", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      json: vi.fn().mockResolvedValue({
+        error: { code: "token_expired" },
+      }),
+      text: vi.fn().mockResolvedValue('{"error":{"code":"token_expired"}}'),
+    })));
+    writeFileSync(
+      join(agentDir, "pi-account-router-cache.json"),
+      `${JSON.stringify({
+        snapshots: {
+          "openai-codex-2": {
+            identity: "work@example.com",
+            summary: "5h left 80% | 7d left 65%",
+            details: ["5h left 80%", "7d left 65%"],
+            score: 145,
+            badges: ["usage", "native login"],
+          },
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+        handlers.set(event, handler);
+      }),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "expired-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await handlers.get("session_start")?.({}, ctx);
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+    const textCtx = createContext(modelRegistry, {
+      hasUI: false,
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await command.handler("status", textCtx);
+
+    expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toContain("work@example.com");
+    expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toContain("5h left 80% | 7d left 65%");
+  });
+
+  it("does not keep mutating footer status while the account panel is open", async () => {
+    const deferred = createDeferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    vi.stubGlobal("fetch", vi.fn(() => deferred.promise));
+
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    let releasePanel!: () => void;
+    const panelPromise = new Promise<undefined>((resolve) => {
+      releasePanel = () => resolve(undefined);
+    });
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        custom: vi.fn().mockImplementation(async () => panelPromise),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    const commandPromise = command.handler("", ctx);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
+
+    deferred.resolve({
+      ok: true,
+      json: async () => ({
+        email: "work@example.com",
+        rate_limit: {
+          primary_window: {
+            used_percent: 20,
+            limit_window_seconds: FIVE_HOURS,
+            reset_at: 4_102_444_800,
+          },
+          secondary_window: {
+            used_percent: 35,
+            limit_window_seconds: SEVEN_DAYS,
+            reset_at: 4_102_444_800,
+          },
+        },
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
+
+    releasePanel();
     await commandPromise;
   });
 

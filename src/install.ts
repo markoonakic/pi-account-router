@@ -30,12 +30,67 @@ function getCapabilityBadges(family: ProviderFamilyId): string[] {
   ].filter((value): value is string => value !== undefined);
 }
 
+function isInformativeSnapshot(snapshot: AccountSnapshot | undefined): snapshot is AccountSnapshot {
+  if (snapshot === undefined) {
+    return false;
+  }
+
+  return snapshot.identity !== undefined
+    || snapshot.summary.trim().length > 0
+    || snapshot.details.length > 0;
+}
+
+function isExpiredOAuthCredential(value: unknown): value is { expires: number } {
+  return value !== null
+    && typeof value === "object"
+    && typeof (value as { expires?: unknown }).expires === "number"
+    && (value as { expires: number }).expires <= Date.now() + 60_000;
+}
+
+function mergeSnapshot(
+  previous: AccountSnapshot | undefined,
+  next: AccountSnapshot | undefined,
+  capabilityBadges: string[],
+): AccountSnapshot {
+  const badges = Array.from(new Set([
+    ...capabilityBadges,
+    ...(previous?.badges ?? []),
+    ...(next?.badges ?? []),
+  ]));
+
+  if (!isInformativeSnapshot(next)) {
+    if (previous !== undefined) {
+      return {
+        ...previous,
+        badges,
+      };
+    }
+
+    return {
+      summary: "",
+      details: [],
+      score: 0,
+      badges,
+    };
+  }
+
+  const identity = next.identity ?? previous?.identity;
+
+  return {
+    summary: next.summary.trim().length > 0 ? next.summary : previous?.summary ?? "",
+    details: next.details.length > 0 ? next.details : previous?.details ?? [],
+    score: next.score,
+    badges,
+    ...(identity === undefined ? {} : { identity }),
+  };
+}
+
 export function installAccountRouter(
   pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on" | "exec">,
 ): void {
   const store = createRuntimeStore();
   let snapshots: Record<string, AccountSnapshot | undefined> = loadAccountRouterSnapshotCache().snapshots;
-  let backgroundRefresh: Promise<AccountCatalogEntry[] | void> | undefined;
+  
 
   function buildCatalog(): AccountCatalogEntry[] {
     const settings = loadAccountRouterSettings();
@@ -72,44 +127,66 @@ export function installAccountRouter(
     for (const account of store.getAccounts()) {
       const adapter = ADAPTERS[account.family];
       const capabilityBadges = getCapabilityBadges(account.family);
+      const previousSnapshot = snapshots[account.providerName];
 
       if (adapter.createSnapshot === undefined) {
-        nextSnapshots[account.providerName] = {
-          summary: "",
-          details: [],
-          score: 0,
-          badges: capabilityBadges,
-        };
+        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
         continue;
       }
 
       try {
-        const snapshot = await adapter.createSnapshot(
+        const storedAuth = ctx.modelRegistry.authStorage.get(account.providerName);
+        let authForSnapshot = storedAuth;
+        let snapshot = await adapter.createSnapshot(
           {
             providerName: account.providerName,
-            auth: ctx.modelRegistry.authStorage.get(account.providerName),
+            auth: authForSnapshot,
           },
           ctx.signal,
         );
 
-        nextSnapshots[account.providerName] = snapshot === undefined
-          ? {
-              summary: "",
-              details: [],
-              score: 0,
-              badges: capabilityBadges,
+        if (
+          !isInformativeSnapshot(snapshot)
+          && account.authType === "oauth"
+          && storedAuth
+          && typeof storedAuth === "object"
+          && isExpiredOAuthCredential(storedAuth)
+        ) {
+          try {
+            if (account.aliasIndex > 1) {
+              const oauth = adapter.buildAliasOAuth(account.aliasIndex);
+              const refreshedAuth = await oauth.refreshToken(storedAuth);
+              authForSnapshot = refreshedAuth && typeof refreshedAuth === "object"
+                ? {
+                    ...storedAuth,
+                    ...refreshedAuth,
+                    access: oauth.getApiKey(refreshedAuth),
+                  }
+                : storedAuth;
+            } else {
+              const refreshedApiKey = await ctx.modelRegistry.authStorage.getApiKey(account.providerName);
+              authForSnapshot = refreshedApiKey === undefined
+                ? storedAuth
+                : {
+                    ...storedAuth,
+                    access: refreshedApiKey,
+                  };
             }
-          : {
-              ...snapshot,
-              badges: Array.from(new Set([...capabilityBadges, ...snapshot.badges])),
-            };
+            snapshot = await adapter.createSnapshot(
+              {
+                providerName: account.providerName,
+                auth: authForSnapshot,
+              },
+              ctx.signal,
+            );
+          } catch {
+            // Keep the original empty snapshot and fall back to the last known snapshot below.
+          }
+        }
+
+        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, snapshot, capabilityBadges);
       } catch {
-        nextSnapshots[account.providerName] = {
-          summary: "",
-          details: [],
-          score: 0,
-          badges: capabilityBadges,
-        };
+        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
       }
     }
 
@@ -213,26 +290,15 @@ export function installAccountRouter(
     return catalog;
   }
 
-  function scheduleBackgroundRefresh(ctx: ExtensionContext): void {
-    if (backgroundRefresh !== undefined) {
-      return;
-    }
-
-    backgroundRefresh = refreshFromContext(ctx)
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
-      })
-      .finally(() => {
-        backgroundRefresh = undefined;
-      });
-  }
-
   registerAccountRouterCommand(pi, {
     async listAccounts(ctx: ExtensionCommandContext) {
       const catalog = syncAccountsFromContext(ctx);
       updateStatus(ctx, catalog);
-      scheduleBackgroundRefresh(ctx);
+
+      if (!ctx.hasUI) {
+        return refreshFromContext(ctx);
+      }
+
       return catalog;
     },
     async addAccount(family: ProviderFamilyId, ctx: ExtensionCommandContext) {
