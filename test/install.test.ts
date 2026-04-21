@@ -194,6 +194,123 @@ describe("installAccountRouter", () => {
     await commandPromise;
   });
 
+  it("reuses the last known account identity immediately after reload while refresh is still running", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
+    tempDirs.push(agentDir);
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+
+    stubCodexUsageFetchByToken({
+      "alias-access": {
+        email: "work@example.com",
+        fiveHourUsedPercent: 20,
+        weeklyUsedPercent: 35,
+      },
+    });
+
+    const firstHandlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+    const firstPi = {
+      registerCommand: vi.fn(),
+      registerProvider: vi.fn(),
+      on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+        firstHandlers.set(event, handler);
+      }),
+    };
+
+    installAccountRouter(firstPi as any);
+
+    const firstAuthStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const firstModelRegistry = createModelRegistry(firstAuthStorage);
+    const firstCtx = createContext(firstModelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await firstHandlers.get("session_start")?.({}, firstCtx);
+
+    const deferred = createDeferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    vi.stubGlobal("fetch", vi.fn(() => deferred.promise));
+
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const secondRegisterCommand = vi.fn();
+    const secondPi = {
+      registerCommand: secondRegisterCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(secondPi as any);
+
+    const secondAuthStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const secondModelRegistry = createModelRegistry(secondAuthStorage);
+    const secondCtx = createContext(secondModelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      },
+    });
+
+    const [, command] = secondRegisterCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    const commandPromise = command.handler("", secondCtx);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(panelFactory).toBeTypeOf("function");
+
+    if (panelFactory === undefined) {
+      deferred.resolve({ ok: true, json: async () => ({}) });
+      await commandPromise;
+      return;
+    }
+
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+      {},
+      vi.fn(),
+    );
+
+    const lines = component.render(120);
+
+    expect(lines).toContain("› work@example.com");
+    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
+
+    deferred.resolve({
+      ok: true,
+      json: async () => ({
+        email: "work@example.com",
+        rate_limit: {
+          primary_window: {
+            used_percent: 20,
+            limit_window_seconds: FIVE_HOURS,
+            reset_at: 4_102_444_800,
+          },
+          secondary_window: {
+            used_percent: 35,
+            limit_window_seconds: SEVEN_DAYS,
+            reset_at: 4_102_444_800,
+          },
+        },
+      }),
+    });
+
+    await commandPromise;
+  });
+
   it("catches refresh errors in event handlers instead of breaking the session", async () => {
     const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
     const registerCommand = vi.fn();

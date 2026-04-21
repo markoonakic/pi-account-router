@@ -7,6 +7,7 @@ import { getApiProvider, type Api } from "@mariozechner/pi-ai";
 import { discoverAccounts } from "./auth/discovery.js";
 import { addAccountAndLogin, loginWithNativeLikeDialog } from "./auth/login.js";
 import { registerAccountRouterCommand } from "./commands/account-router.js";
+import { loadAccountRouterSnapshotCache, saveAccountRouterSnapshotCache } from "./config/cache.js";
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "./config/store.js";
 import { getFamilyForProviderName } from "./providers/families.js";
 import { syncProviders } from "./providers/register.js";
@@ -33,7 +34,7 @@ export function installAccountRouter(
   pi: Pick<ExtensionAPI, "registerCommand" | "registerProvider" | "on" | "exec">,
 ): void {
   const store = createRuntimeStore();
-  let snapshots: Record<string, AccountSnapshot | undefined> = {};
+  let snapshots: Record<string, AccountSnapshot | undefined> = loadAccountRouterSnapshotCache().snapshots;
   let backgroundRefresh: Promise<AccountCatalogEntry[] | void> | undefined;
 
   function buildCatalog(): AccountCatalogEntry[] {
@@ -187,6 +188,7 @@ export function installAccountRouter(
     store.bindModelRegistry(ctx.modelRegistry);
     store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
     snapshots = await buildSnapshots(ctx);
+    saveAccountRouterSnapshotCache(undefined, { snapshots });
     refreshActiveSelections();
 
     const originalApiProviders = new Map<Api, ReturnType<typeof getApiProvider> | undefined>();
