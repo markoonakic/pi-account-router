@@ -40,7 +40,7 @@ describe("account panel shell", () => {
     expect(shell.header).toEqual({
       title: "Account Router",
       hotkeys: [
-        { key: "enter", label: "pin" },
+        { key: "enter", label: "toggle pin" },
         { key: "r", label: "rename" },
         { key: "u", label: "refresh" },
         { key: "a", label: "add" },

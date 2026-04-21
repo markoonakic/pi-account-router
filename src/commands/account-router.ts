@@ -30,6 +30,11 @@ type AccountPanelAction =
   | { action: "add" }
   | { action: "remove"; providerName: string };
 
+type AccountPanelController = {
+  togglePin(providerName: string, currentlyPinned: boolean): Promise<FooterAccountEntry[]>;
+  refresh(providerName: string): Promise<FooterAccountEntry[]>;
+};
+
 interface AccountPanelSectionEntry {
   familyId: string;
   familyDisplayName: string;
@@ -125,6 +130,19 @@ function buildPanelSections(accounts: readonly FooterAccountEntry[]): AccountPan
   return [...sections.values()];
 }
 
+function formatPanelRowSecondaryText(account: FooterAccountEntry, providerDisplayName: string): string {
+  const secondaryText = account.secondaryText ?? formatSecondaryGhostLine({
+    providerName: account.providerName,
+    providerDisplayName,
+    ...(account.summary === undefined ? {} : { summary: account.summary }),
+  });
+  const stateBits = [
+    account.pinned ? "pinned" : undefined,
+  ].filter((value): value is string => value !== undefined);
+
+  return stateBits.length === 0 ? secondaryText : `${secondaryText} · ${stateBits.join(" · ")}`;
+}
+
 function buildAccountPanel(accounts: readonly FooterAccountEntry[]): AccountPanelShellModel {
   return buildAccountPanelShell({
     ghostSummary: getPanelGhostSummary(accounts),
@@ -143,24 +161,30 @@ function buildAccountPanel(accounts: readonly FooterAccountEntry[]): AccountPane
           ...(account.label === undefined ? {} : { label: account.label }),
           ...(account.identity === undefined ? {} : { identity: account.identity }),
         }),
-        secondaryText: account.secondaryText ?? formatSecondaryGhostLine({
-          providerName: account.providerName,
-          providerDisplayName: section.familyDisplayName,
-          ...(account.summary === undefined ? {} : { summary: account.summary }),
-        }),
+        secondaryText: formatPanelRowSecondaryText(account, section.familyDisplayName),
       })),
     })),
   });
 }
 
+function flattenPanelRows(shell: AccountPanelShellModel) {
+  return shell.sections.flatMap((section) => section.rows.map((row) => ({ section, row })));
+}
+
 function createAccountPanelComponent(
   tui: TUI,
   theme: Theme,
-  shell: AccountPanelShellModel,
+  initialAccounts: readonly FooterAccountEntry[],
   done: (result: AccountPanelAction | undefined) => void,
+  controller?: AccountPanelController,
 ) {
-  const rows = shell.sections.flatMap((section) => section.rows.map((row) => ({ section, row })));
+  let currentAccounts = [...initialAccounts];
+  let shell = buildAccountPanel(currentAccounts);
+  let rows = flattenPanelRows(shell);
   let selectedIndex = rows.length > 0 ? 0 : -1;
+  let selectedAccountId = rows[selectedIndex]?.row.accountId;
+  let busyMessage: string | undefined;
+  let closed = false;
   let cachedLines: string[] | undefined;
   let cachedWidth: number | undefined;
 
@@ -171,15 +195,65 @@ function createAccountPanelComponent(
 
   const getSelectedRow = () => (selectedIndex >= 0 ? rows[selectedIndex]?.row : undefined);
 
+  const updateShell = (nextAccounts: readonly FooterAccountEntry[]) => {
+    currentAccounts = [...nextAccounts];
+    shell = buildAccountPanel(currentAccounts);
+    rows = flattenPanelRows(shell);
+
+    if (selectedAccountId !== undefined) {
+      const nextIndex = rows.findIndex((entry) => entry.row.accountId === selectedAccountId);
+      selectedIndex = nextIndex >= 0 ? nextIndex : Math.min(selectedIndex, rows.length - 1);
+    } else {
+      selectedIndex = rows.length > 0 ? 0 : -1;
+    }
+
+    selectedAccountId = selectedIndex >= 0 ? rows[selectedIndex]?.row.accountId : undefined;
+    clearCache();
+  };
+
+  const runBusyAction = (message: string, work: () => Promise<readonly FooterAccountEntry[]>) => {
+    if (busyMessage !== undefined) {
+      return;
+    }
+
+    busyMessage = message;
+    clearCache();
+    tui.requestRender();
+
+    void work()
+      .then((nextAccounts) => {
+        if (closed) {
+          return;
+        }
+
+        updateShell(nextAccounts);
+      })
+      .finally(() => {
+        if (closed) {
+          return;
+        }
+
+        busyMessage = undefined;
+        clearCache();
+        tui.requestRender();
+      });
+  };
+
   return {
     handleInput(data: string): void {
       if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+        closed = true;
         done(undefined);
+        return;
+      }
+
+      if (busyMessage !== undefined) {
         return;
       }
 
       if ((data === "k" || matchesKey(data, "up")) && rows.length > 0) {
         selectedIndex = Math.max(0, selectedIndex - 1);
+        selectedAccountId = rows[selectedIndex]?.row.accountId;
         clearCache();
         tui.requestRender();
         return;
@@ -187,16 +261,28 @@ function createAccountPanelComponent(
 
       if ((data === "j" || matchesKey(data, "down")) && rows.length > 0) {
         selectedIndex = Math.min(rows.length - 1, selectedIndex + 1);
+        selectedAccountId = rows[selectedIndex]?.row.accountId;
         clearCache();
         tui.requestRender();
         return;
       }
 
       const selectedRow = getSelectedRow();
+      const selectedAccount = selectedRow === undefined
+        ? undefined
+        : currentAccounts.find((account) => account.providerName === selectedRow.accountId)
+          ?? undefined;
 
       if (matchesKey(data, "u")) {
         if (selectedRow !== undefined) {
-          done({ action: "refresh", providerName: selectedRow.accountId });
+          if (controller !== undefined) {
+            runBusyAction(
+              `Refreshing ${selectedAccount?.displayName ?? selectedRow.accountId}…`,
+              () => controller.refresh(selectedRow.accountId),
+            );
+          } else {
+            done({ action: "refresh", providerName: selectedRow.accountId });
+          }
         }
         return;
       }
@@ -211,7 +297,16 @@ function createAccountPanelComponent(
       }
 
       if (data === "enter" || data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return")) {
-        done({ action: "select", providerName: selectedRow.accountId });
+        if (controller !== undefined) {
+          runBusyAction(
+            selectedAccount?.pinned
+              ? `Unpinning ${selectedAccount.displayName ?? selectedRow.accountId}…`
+              : `Pinning ${selectedAccount?.displayName ?? selectedRow.accountId}…`,
+            () => controller.togglePin(selectedRow.accountId, Boolean(selectedAccount?.pinned)),
+          );
+        } else {
+          done({ action: "select", providerName: selectedRow.accountId });
+        }
         return;
       }
 
@@ -242,6 +337,9 @@ function createAccountPanelComponent(
       addLine(theme.fg("accent", theme.bold(shell.header.title)));
       addLine(theme.fg("muted", shell.header.ghostSummary));
       addLine(theme.fg("dim", shell.header.hotkeys.map((hotkey) => `${hotkey.key} ${hotkey.label}`).join(" • ")));
+      if (busyMessage !== undefined) {
+        addLine(theme.fg("warning", busyMessage));
+      }
       addLine();
 
       if (rows.length === 0) {
@@ -283,11 +381,10 @@ function createAccountPanelComponent(
 async function showAccountPanel(
   ctx: ExtensionCommandContext,
   accounts: readonly FooterAccountEntry[],
+  controller?: AccountPanelController,
 ): Promise<AccountPanelAction | undefined> {
-  const shell = buildAccountPanel(accounts);
-
   return ctx.ui.custom<AccountPanelAction | undefined>((tui, theme, _keybindings, done) =>
-    createAccountPanelComponent(tui, theme, shell, done)
+    createAccountPanelComponent(tui, theme, accounts, done, controller)
   );
 }
 
@@ -301,16 +398,36 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
   }
 
   while (true) {
-    const action = await showAccountPanel(ctx, accounts);
+    const action = await showAccountPanel(ctx, accounts, {
+      async togglePin(providerName: string, currentlyPinned: boolean) {
+        const family = getFamilyForProviderName(providerName);
+        if (currentlyPinned && family !== undefined) {
+          host.unpin(family);
+        } else {
+          host.pinAccount(providerName);
+        }
+        return host.listAccounts(ctx);
+      },
+      async refresh(providerName: string) {
+        await host.refreshAccount(providerName, ctx);
+        return host.listAccounts(ctx);
+      },
+    });
 
     if (action === undefined) {
       return;
     }
 
     if (action.action === "select") {
-      host.pinAccount(action.providerName);
       const selectedAccount = accounts.find((account) => account.providerName === action.providerName);
-      ctx.ui.notify(`Pinned ${selectedAccount?.displayName ?? action.providerName}`, "info");
+      const family = getFamilyForProviderName(action.providerName);
+      if (selectedAccount?.pinned && family !== undefined) {
+        host.unpin(family);
+        ctx.ui.notify(`Unpinned ${selectedAccount.displayName ?? action.providerName}`, "info");
+      } else {
+        host.pinAccount(action.providerName);
+        ctx.ui.notify(`Pinned ${selectedAccount?.displayName ?? action.providerName}`, "info");
+      }
       return;
     }
 

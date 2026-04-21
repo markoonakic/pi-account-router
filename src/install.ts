@@ -121,73 +121,79 @@ export function installAccountRouter(
     return catalog.find((entry) => entry.active) ?? catalog[0];
   }
 
+  async function buildSnapshotForAccount(
+    account: ReturnType<typeof store.getAccounts>[number],
+    ctx: ExtensionContext,
+  ): Promise<AccountSnapshot | undefined> {
+    const adapter = ADAPTERS[account.family];
+    const capabilityBadges = getCapabilityBadges(account.family);
+    const previousSnapshot = snapshots[account.providerName];
+
+    if (adapter.createSnapshot === undefined) {
+      return mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
+    }
+
+    try {
+      const storedAuth = ctx.modelRegistry.authStorage.get(account.providerName);
+      let authForSnapshot = storedAuth;
+      let snapshot = await adapter.createSnapshot(
+        {
+          providerName: account.providerName,
+          auth: authForSnapshot,
+        },
+        ctx.signal,
+      );
+
+      if (
+        !isInformativeSnapshot(snapshot)
+        && account.authType === "oauth"
+        && storedAuth
+        && typeof storedAuth === "object"
+        && isExpiredOAuthCredential(storedAuth)
+      ) {
+        try {
+          if (account.aliasIndex > 1) {
+            const oauth = adapter.buildAliasOAuth(account.aliasIndex);
+            const refreshedAuth = await oauth.refreshToken(storedAuth);
+            authForSnapshot = refreshedAuth && typeof refreshedAuth === "object"
+              ? {
+                  ...storedAuth,
+                  ...refreshedAuth,
+                  access: oauth.getApiKey(refreshedAuth),
+                }
+              : storedAuth;
+          } else {
+            const refreshedApiKey = await ctx.modelRegistry.authStorage.getApiKey(account.providerName);
+            authForSnapshot = refreshedApiKey === undefined
+              ? storedAuth
+              : {
+                  ...storedAuth,
+                  access: refreshedApiKey,
+                };
+          }
+          snapshot = await adapter.createSnapshot(
+            {
+              providerName: account.providerName,
+              auth: authForSnapshot,
+            },
+            ctx.signal,
+          );
+        } catch {
+          // Keep the original empty snapshot and fall back to the last known snapshot below.
+        }
+      }
+
+      return mergeSnapshot(previousSnapshot, snapshot, capabilityBadges);
+    } catch {
+      return mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
+    }
+  }
+
   async function buildSnapshots(ctx: ExtensionContext): Promise<Record<string, AccountSnapshot | undefined>> {
     const nextSnapshots: Record<string, AccountSnapshot | undefined> = {};
 
     for (const account of store.getAccounts()) {
-      const adapter = ADAPTERS[account.family];
-      const capabilityBadges = getCapabilityBadges(account.family);
-      const previousSnapshot = snapshots[account.providerName];
-
-      if (adapter.createSnapshot === undefined) {
-        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
-        continue;
-      }
-
-      try {
-        const storedAuth = ctx.modelRegistry.authStorage.get(account.providerName);
-        let authForSnapshot = storedAuth;
-        let snapshot = await adapter.createSnapshot(
-          {
-            providerName: account.providerName,
-            auth: authForSnapshot,
-          },
-          ctx.signal,
-        );
-
-        if (
-          !isInformativeSnapshot(snapshot)
-          && account.authType === "oauth"
-          && storedAuth
-          && typeof storedAuth === "object"
-          && isExpiredOAuthCredential(storedAuth)
-        ) {
-          try {
-            if (account.aliasIndex > 1) {
-              const oauth = adapter.buildAliasOAuth(account.aliasIndex);
-              const refreshedAuth = await oauth.refreshToken(storedAuth);
-              authForSnapshot = refreshedAuth && typeof refreshedAuth === "object"
-                ? {
-                    ...storedAuth,
-                    ...refreshedAuth,
-                    access: oauth.getApiKey(refreshedAuth),
-                  }
-                : storedAuth;
-            } else {
-              const refreshedApiKey = await ctx.modelRegistry.authStorage.getApiKey(account.providerName);
-              authForSnapshot = refreshedApiKey === undefined
-                ? storedAuth
-                : {
-                    ...storedAuth,
-                    access: refreshedApiKey,
-                  };
-            }
-            snapshot = await adapter.createSnapshot(
-              {
-                providerName: account.providerName,
-                auth: authForSnapshot,
-              },
-              ctx.signal,
-            );
-          } catch {
-            // Keep the original empty snapshot and fall back to the last known snapshot below.
-          }
-        }
-
-        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, snapshot, capabilityBadges);
-      } catch {
-        nextSnapshots[account.providerName] = mergeSnapshot(previousSnapshot, undefined, capabilityBadges);
-      }
+      nextSnapshots[account.providerName] = await buildSnapshotForAccount(account, ctx);
     }
 
     return nextSnapshots;
@@ -331,18 +337,37 @@ export function installAccountRouter(
     unpin(family?: ProviderFamilyId) {
       if (family !== undefined) {
         store.setPinnedProvider(family, undefined);
+        store.setActiveProvider(family, undefined);
+        refreshActiveSelections();
         return;
       }
 
       for (const familyId of Object.keys(ADAPTERS) as ProviderFamilyId[]) {
         store.setPinnedProvider(familyId, undefined);
+        store.setActiveProvider(familyId, undefined);
       }
+      refreshActiveSelections();
     },
     async refresh(ctx: ExtensionCommandContext) {
       await refreshFromContext(ctx);
     },
-    async refreshAccount(_providerName: string, ctx: ExtensionCommandContext) {
-      await refreshFromContext(ctx);
+    async refreshAccount(providerName: string, ctx: ExtensionCommandContext) {
+      store.bindModelRegistry(ctx.modelRegistry);
+      store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
+      const account = store.getAccounts().find((entry) => entry.providerName === providerName);
+
+      if (account === undefined) {
+        await refreshFromContext(ctx);
+        return;
+      }
+
+      snapshots = {
+        ...snapshots,
+        [providerName]: await buildSnapshotForAccount(account, ctx),
+      };
+      saveAccountRouterSnapshotCache(undefined, { snapshots });
+      refreshActiveSelections();
+      updateStatus(ctx, buildCatalog());
     },
     async renameAccount(providerName: string, ctx: ExtensionCommandContext) {
       const currentLabel = buildCatalog().find((entry) => entry.providerName === providerName)?.label;

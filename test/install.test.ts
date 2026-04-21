@@ -567,6 +567,93 @@ describe("installAccountRouter", () => {
     await commandPromise;
   });
 
+  it("refreshes only the selected account snapshot when a panel row requests refresh", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      const token = init?.headers?.Authorization?.replace(/^Bearer\s+/, "");
+      if (token === "alias-access-2") {
+        return {
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            email: "work@example.com",
+            rate_limit: {
+              primary_window: {
+                used_percent: 20,
+                limit_window_seconds: FIVE_HOURS,
+                reset_at: 4_102_444_800,
+              },
+              secondary_window: {
+                used_percent: 35,
+                limit_window_seconds: SEVEN_DAYS,
+                reset_at: 4_102_444_800,
+              },
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          email: "person@example.com",
+          rate_limit: {
+            primary_window: {
+              used_percent: 45,
+              limit_window_seconds: FIVE_HOURS,
+              reset_at: 4_102_444_800,
+            },
+            secondary_window: {
+              used_percent: 58,
+              limit_window_seconds: SEVEN_DAYS,
+              reset_at: 4_102_444_800,
+            },
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const registerCommand = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider: vi.fn(),
+      on: vi.fn(),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex-2": { type: "oauth", access: "alias-access-2", refresh: "r2", expires: 4_102_444_800_000 },
+      "openai-codex-3": { type: "oauth", access: "alias-access-3", refresh: "r3", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+        custom: vi.fn()
+          .mockResolvedValueOnce({ action: "refresh", providerName: "openai-codex-2" })
+          .mockResolvedValueOnce(undefined),
+      },
+    });
+
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: any) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer alias-access-2",
+        }),
+      }),
+    );
+  });
+
   it("catches refresh errors in event handlers instead of breaking the session", async () => {
     const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
     const registerCommand = vi.fn();
