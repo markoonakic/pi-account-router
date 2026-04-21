@@ -25,6 +25,7 @@ export interface AccountRouterCommandHost {
 type AccountPanelAction =
   | { action: "select"; providerName: string }
   | { action: "refresh"; providerName: string }
+  | { action: "refresh-all" }
   | { action: "rename"; providerName: string }
   | { action: "details"; providerName: string }
   | { action: "add" }
@@ -33,6 +34,7 @@ type AccountPanelAction =
 type AccountPanelController = {
   togglePin(providerName: string, currentlyPinned: boolean): Promise<FooterAccountEntry[]>;
   refresh(providerName: string): Promise<FooterAccountEntry[]>;
+  refreshAll(): Promise<FooterAccountEntry[]>;
 };
 
 interface AccountPanelSectionEntry {
@@ -287,6 +289,15 @@ function createAccountPanelComponent(
         return;
       }
 
+      if (data === "U") {
+        if (controller !== undefined) {
+          runBusyAction("Refreshing all accounts…", () => controller.refreshAll());
+        } else {
+          done({ action: "refresh-all" });
+        }
+        return;
+      }
+
       if (matchesKey(data, "a")) {
         done({ action: "add" });
         return;
@@ -412,6 +423,10 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
         await host.refreshAccount(providerName, ctx);
         return host.listAccounts(ctx);
       },
+      async refreshAll() {
+        await host.refresh(ctx);
+        return host.listAccounts(ctx);
+      },
     });
 
     if (action === undefined) {
@@ -433,6 +448,12 @@ async function runDefaultCommand(ctx: ExtensionCommandContext, host: AccountRout
 
     if (action.action === "refresh") {
       await host.refreshAccount(action.providerName, ctx);
+      accounts = await host.listAccounts(ctx);
+      continue;
+    }
+
+    if (action.action === "refresh-all") {
+      await host.refresh(ctx);
       accounts = await host.listAccounts(ctx);
       continue;
     }

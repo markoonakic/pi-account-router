@@ -653,6 +653,87 @@ describe("account-router command surface", () => {
     expect(component.render(120).join("\n")).toContain("5h left 81% | 7d left 66%");
   });
 
+  it("supports uppercase U to refresh all accounts in place", async () => {
+    const registerCommand = vi.fn();
+    const initialAccount = {
+      providerName: "openai-codex-2",
+      displayName: "ChatGPT Codex #2",
+      providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+      active: false,
+      pinned: false,
+      exhausted: false,
+      needsReauth: false,
+      summary: "5h left 80% | 7d left 65%",
+      badges: ["usage"],
+    };
+    const refreshedAccount = {
+      ...initialAccount,
+      summary: "5h left 82% | 7d left 67%",
+    };
+    let resolveRefresh!: () => void;
+    const refreshPromise = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    let panelFactory:
+      | ((...args: any[]) => any)
+      | undefined;
+    const host = createHost({
+      listAccounts: vi.fn()
+        .mockResolvedValueOnce([initialAccount])
+        .mockResolvedValueOnce([refreshedAccount]),
+      refresh: vi.fn().mockImplementation(async () => refreshPromise),
+    });
+    const ctx = createContext({
+      ui: {
+        notify: vi.fn(),
+        select: vi.fn(),
+        custom: vi.fn().mockImplementation(async (factory) => {
+          panelFactory = factory as (...args: any[]) => any;
+          return undefined;
+        }),
+      } as any,
+    });
+
+    registerAccountRouterCommand({ registerCommand } as any, host);
+    const [, command] = registerCommand.mock.calls[0] as [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+    ];
+
+    await command.handler("", ctx);
+
+    expect(panelFactory).toBeTypeOf("function");
+    if (panelFactory === undefined) {
+      return;
+    }
+
+    const done = vi.fn();
+    const component = await panelFactory(
+      { requestRender: vi.fn() },
+      {
+        fg: (_color: string, text: string) => text,
+        bold: (text: string) => text,
+      },
+      {},
+      done,
+    );
+
+    component.handleInput("U");
+    await Promise.resolve();
+
+    expect(host.refresh).toHaveBeenCalledWith(ctx);
+    expect(done).not.toHaveBeenCalled();
+    expect(component.render(120)).toContain("Refreshing all accounts…");
+
+    resolveRefresh();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(component.render(120)).not.toContain("Refreshing all accounts…");
+    expect(component.render(120).join("\n")).toContain("5h left 82% | 7d left 67%");
+  });
+
   it("dispatches a rename action from the custom panel to the host", async () => {
     const registerCommand = vi.fn();
     const account = {

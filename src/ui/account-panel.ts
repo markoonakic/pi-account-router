@@ -50,7 +50,8 @@ export const ACCOUNT_PANEL_TITLE = "Account Router";
 export const ACCOUNT_PANEL_HOTKEYS = [
   { key: "enter", label: "toggle pin" },
   { key: "r", label: "rename" },
-  { key: "u", label: "refresh" },
+  { key: "u", label: "refresh row" },
+  { key: "U", label: "refresh all" },
   { key: "a", label: "add" },
   { key: "d", label: "details" },
   { key: "backspace", label: "remove" },
