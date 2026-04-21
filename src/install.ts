@@ -40,13 +40,6 @@ function isInformativeSnapshot(snapshot: AccountSnapshot | undefined): snapshot 
     || snapshot.details.length > 0;
 }
 
-function isExpiredOAuthCredential(value: unknown): value is { expires: number } {
-  return value !== null
-    && typeof value === "object"
-    && typeof (value as { expires?: unknown }).expires === "number"
-    && (value as { expires: number }).expires <= Date.now() + 60_000;
-}
-
 function mergeSnapshot(
   previous: AccountSnapshot | undefined,
   next: AccountSnapshot | undefined,
@@ -134,54 +127,13 @@ export function installAccountRouter(
     }
 
     try {
-      const storedAuth = ctx.modelRegistry.authStorage.get(account.providerName);
-      let authForSnapshot = storedAuth;
-      let snapshot = await adapter.createSnapshot(
+      const snapshot = await adapter.createSnapshot(
         {
           providerName: account.providerName,
-          auth: authForSnapshot,
+          auth: ctx.modelRegistry.authStorage.get(account.providerName),
         },
         ctx.signal,
       );
-
-      if (
-        !isInformativeSnapshot(snapshot)
-        && account.authType === "oauth"
-        && storedAuth
-        && typeof storedAuth === "object"
-        && isExpiredOAuthCredential(storedAuth)
-      ) {
-        try {
-          if (account.aliasIndex > 1) {
-            const oauth = adapter.buildAliasOAuth(account.aliasIndex);
-            const refreshedAuth = await oauth.refreshToken(storedAuth);
-            authForSnapshot = refreshedAuth && typeof refreshedAuth === "object"
-              ? {
-                  ...storedAuth,
-                  ...refreshedAuth,
-                  access: oauth.getApiKey(refreshedAuth),
-                }
-              : storedAuth;
-          } else {
-            const refreshedApiKey = await ctx.modelRegistry.authStorage.getApiKey(account.providerName);
-            authForSnapshot = refreshedApiKey === undefined
-              ? storedAuth
-              : {
-                  ...storedAuth,
-                  access: refreshedApiKey,
-                };
-          }
-          snapshot = await adapter.createSnapshot(
-            {
-              providerName: account.providerName,
-              auth: authForSnapshot,
-            },
-            ctx.signal,
-          );
-        } catch {
-          // Keep the original empty snapshot and fall back to the last known snapshot below.
-        }
-      }
 
       return mergeSnapshot(previousSnapshot, snapshot, capabilityBadges);
     } catch {

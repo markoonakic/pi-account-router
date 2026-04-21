@@ -316,7 +316,7 @@ describe("installAccountRouter", () => {
     await commandPromise;
   });
 
-  it("refreshes expired alias snapshot auth through the adapter before falling back to a generic provider label", async () => {
+  it("does not consume alias refresh tokens while rebuilding snapshot labels", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-install-"));
     tempDirs.push(agentDir);
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
@@ -354,21 +354,22 @@ describe("installAccountRouter", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const refreshTokenSpy = vi.fn(async (credentials: unknown) => {
+      const existing = credentials as { accountId?: string };
+      return {
+        access: "fresh-access",
+        refresh: "fresh-refresh",
+        expires: Date.now() + 60_000,
+        ...(existing.accountId === undefined ? {} : { accountId: existing.accountId }),
+      };
+    });
     const originalBuildAliasOAuth = ADAPTERS["openai-codex"].buildAliasOAuth;
     ADAPTERS["openai-codex"].buildAliasOAuth = vi.fn((_index: number) => ({
       name: "ChatGPT Codex #2",
       async login() {
         return { access: "fresh-access", refresh: "fresh-refresh", expires: Date.now() + 60_000 };
       },
-      async refreshToken(credentials: unknown) {
-        const existing = credentials as { accountId?: string };
-        return {
-          access: "fresh-access",
-          refresh: "fresh-refresh",
-          expires: Date.now() + 60_000,
-          ...(existing.accountId === undefined ? {} : { accountId: existing.accountId }),
-        };
-      },
+      refreshToken: refreshTokenSpy,
       getApiKey(credentials: unknown) {
         return (credentials as { access: string }).access;
       },
@@ -414,18 +415,17 @@ describe("installAccountRouter", () => {
 
       await command.handler("status", textCtx);
 
-      expect(ADAPTERS["openai-codex"].buildAliasOAuth).toHaveBeenCalledWith(2);
+      expect(refreshTokenSpy).not.toHaveBeenCalled();
       expect(fetchMock).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            Authorization: "Bearer fresh-access",
-            "chatgpt-account-id": "acct_123",
+            Authorization: "Bearer expired-access",
           }),
         }),
       );
-      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toContain("work@example.com");
-      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).not.toContain("openai-codex-2");
+      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toContain("ChatGPT Plus/Pro (Codex)");
+      expect((textCtx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).not.toContain("fresh-access");
     } finally {
       ADAPTERS["openai-codex"].buildAliasOAuth = originalBuildAliasOAuth;
     }
