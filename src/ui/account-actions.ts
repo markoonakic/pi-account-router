@@ -42,6 +42,17 @@ function firstNonEmpty(...values: Array<string | undefined>): string[] {
     .filter((value): value is string => value !== undefined && value.length > 0);
 }
 
+function getDetailsLines(summary: string | undefined, details: string[] | undefined): string[] {
+  const summaryBits = new Set(
+    (summary ?? "")
+      .split("|")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  );
+
+  return firstNonEmpty(...(details ?? [])).filter((detail) => !summaryBits.has(detail));
+}
+
 export async function promptForAccountRename(
   ui: Pick<ExtensionUIContext, "input">,
   input: AccountRenamePromptInput,
@@ -66,7 +77,7 @@ export async function showAccountDetailsMenu(
   const title = firstNonEmpty(
     `${input.displayName} · esc back`,
     input.summary,
-    ...(input.details ?? []),
+    ...getDetailsLines(input.summary, input.details),
   ).join("\n");
   const options = [
     "Reauthenticate",

@@ -26,6 +26,24 @@ describe("account action helpers", () => {
     );
   });
 
+  it("deduplicates summary/detail lines in the details menu title", async () => {
+    const select = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      showAccountDetailsMenu({ select } as any, {
+        providerName: "openai-codex-8",
+        displayName: "marko.nakic.5818@metropolitan.ac.rs",
+        summary: "free | 7d left 100%",
+        details: ["free", "7d left 100%", "native login"],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(select).toHaveBeenCalledWith(
+      "marko.nakic.5818@metropolitan.ac.rs · esc back\nfree | 7d left 100%\nnative login",
+      ["Reauthenticate", "Remove account", "Show provider key"],
+    );
+  });
+
   it("shows details actions without a redundant close option and supports clear-label and provider-key actions", async () => {
     const clearLabelSelect = vi.fn().mockResolvedValue("Clear label");
 
