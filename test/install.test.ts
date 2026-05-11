@@ -1,14 +1,20 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { initTheme } from "@mariozechner/pi-coding-agent";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { ADAPTERS } from "../src/adapters/index.js";
 import { loadAccountRouterSettings, saveAccountRouterSettings } from "../src/config/store.js";
 import { installAccountRouter } from "../src/install.js";
 
 const tempDirs: string[] = [];
+
+beforeEach(() => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-test-agent-"));
+  tempDirs.push(agentDir);
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -339,7 +345,7 @@ describe("installAccountRouter", () => {
     const lines = component.render(120);
 
     expect(lines).toContain("› work@example.com");
-    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65%");
+    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · 5h left 80% | 7d left 65% · active");
 
     deferred.resolve({
       ok: true,
@@ -735,6 +741,37 @@ describe("installAccountRouter", () => {
     );
   });
 
+  it("ignores stale event contexts without touching other stale getters", async () => {
+    const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+    const pi = {
+      registerCommand: vi.fn(),
+      registerProvider: vi.fn(),
+      on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+        handlers.set(event, handler);
+      }),
+    };
+
+    installAccountRouter(pi as any);
+
+    const staleError = new Error("This extension ctx is stale after session replacement or reload.");
+    const staleCtx = {
+      get modelRegistry() {
+        throw staleError;
+      },
+      get hasUI() {
+        throw new Error("hasUI should not be read after a stale context failure");
+      },
+      get signal() {
+        throw new Error("signal should not be read after a stale context failure");
+      },
+      get ui() {
+        throw new Error("ui should not be read after a stale context failure");
+      },
+    };
+
+    await expect(handlers.get("session_start")?.({}, staleCtx)).resolves.toBeUndefined();
+  });
+
   it("syncs providers on session start and registers the base family stream override", async () => {
     const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
     const registerCommand = vi.fn();
@@ -779,6 +816,51 @@ describe("installAccountRouter", () => {
       }),
     );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("account-router", expect.any(String));
+  });
+
+  it("does not resolve base request auth while syncing alias providers on startup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      json: vi.fn().mockResolvedValue({}),
+    })));
+
+    const handlers = new Map<string, (event: unknown, ctx: any) => Promise<void> | void>();
+    const registerCommand = vi.fn();
+    const registerProvider = vi.fn();
+    const pi = {
+      registerCommand,
+      registerProvider,
+      on: vi.fn((event: string, handler: (event: unknown, ctx: any) => Promise<void> | void) => {
+        handlers.set(event, handler);
+      }),
+    };
+
+    installAccountRouter(pi as any);
+
+    const authStorage = createAuthStorage({
+      "openai-codex": { type: "oauth", access: "expired-base-access", refresh: "already-used", expires: 0 },
+      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+    });
+    const modelRegistry = createModelRegistry(authStorage);
+    modelRegistry.getApiKeyAndHeaders.mockRejectedValue(new Error("request auth should not be resolved during startup sync"));
+    const ctx = createContext(modelRegistry, {
+      ui: {
+        setStatus: vi.fn(),
+        notify: vi.fn(),
+      },
+    });
+
+    await handlers.get("session_start")?.({}, ctx);
+
+    expect(modelRegistry.getApiKeyAndHeaders).not.toHaveBeenCalled();
+    expect(registerProvider).toHaveBeenCalledWith(
+      "openai-codex-2",
+      expect.objectContaining({
+        api: "openai-codex-responses",
+        models: [expect.objectContaining({ id: "gpt-5.4" })],
+      }),
+    );
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringMatching(/Account router refresh failed:/), "error");
   });
 
   it("keeps the session responsive when add-account login fails", async () => {
@@ -1112,7 +1194,7 @@ describe("installAccountRouter", () => {
 
     expect(lines).toContain("ChatGPT Plus/Pro (Codex) · 2 accounts · 1 active");
     expect(lines).toContain("› Work Pro Codex");
-    expect(lines).toContain("  ChatGPT Plus/Pro (Codex)");
+    expect(lines).toContain("  ChatGPT Plus/Pro (Codex) · usage unavailable · active");
   });
 
   it("dispatches reauth from the account details menu", async () => {
@@ -1127,7 +1209,13 @@ describe("installAccountRouter", () => {
     installAccountRouter(pi as any);
 
     const authStorage = createAuthStorage({
-      "openai-codex-2": { type: "oauth", access: "alias-access", refresh: "r2", expires: 4_102_444_800_000 },
+      "openai-codex-2": {
+        type: "oauth",
+        access: "alias-access",
+        refresh: "r2",
+        expires: 0,
+        accountId: "acct_123",
+      },
     });
     const modelRegistry = createModelRegistry(authStorage);
     const interactiveCtx = createContext(modelRegistry, {
@@ -1170,6 +1258,14 @@ describe("installAccountRouter", () => {
       expect.stringContaining("esc back"),
       expect.arrayContaining(["Reauthenticate", "Remove account", "Show provider key"]),
     );
+    const detailsTitle = (interactiveCtx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(detailsTitle).toContain("Usage unavailable");
+    expect(detailsTitle).toContain("Provider key: openai-codex-2");
+    expect(detailsTitle).toContain("Auth: oauth");
+    expect(detailsTitle).toContain("Account ID: acct_123");
+    expect(detailsTitle).toContain("Access token expires: 1970-01-01T00:00:00.000Z (expired)");
+    expect(detailsTitle).not.toContain("alias-access");
+    expect(detailsTitle).not.toContain("r2");
     expect(authStorage.login).toHaveBeenCalledWith(
       "openai-codex-2",
       expect.objectContaining({

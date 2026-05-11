@@ -9,7 +9,7 @@ describe("discoverAccounts", () => {
         return {
           openai: { type: "api_key" },
           "google-gemini-cli-2": { type: "oauth" },
-          "openai-codex-2": { type: "oauth" },
+          "openai-codex-2": { type: "oauth", expires: 4_102_444_800_000 },
           anthropic: { type: "api_key" },
           "google-antigravity": { type: "oauth" },
           "github-copilot-2": { type: "api_key" },
@@ -92,6 +92,7 @@ describe("discoverAccounts", () => {
         aliasIndex: 2,
         authenticated: true,
         authType: "oauth",
+        accessExpiresAt: 4_102_444_800_000,
       },
     ]);
   });

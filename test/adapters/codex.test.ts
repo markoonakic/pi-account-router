@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@mariozechner/pi-ai/oauth", () => ({
+vi.mock("@earendil-works/pi-ai/oauth", () => ({
   loginOpenAICodex: vi.fn(),
   refreshOpenAICodexToken: vi.fn(),
 }));
 
-import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/oauth";
+import { loginOpenAICodex, refreshOpenAICodexToken } from "@earendil-works/pi-ai/oauth";
 
 import { classifyCodexRetry } from "../../src/adapters/codex/classify.js";
 import { createCodexAdapter } from "../../src/adapters/codex/index.js";
@@ -81,6 +81,12 @@ describe("codex adapter", () => {
       action: "retry",
       reason: "auth",
       clearPin: true,
+    });
+    expect(classifyCodexRetry("The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.")).toMatchObject({
+      action: "retry",
+      reason: "quota",
+      clearPin: true,
+      cooldownUntil: expect.any(Number),
     });
     expect(classifyCodexRetry("unexpected server crash")).toEqual({
       action: "surface",

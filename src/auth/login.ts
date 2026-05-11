@@ -1,5 +1,5 @@
-import { LoginDialogComponent, type AuthStorage, type ExtensionAPI, type ExtensionUIContext, type ModelRegistry } from "@mariozechner/pi-coding-agent";
-import type { OAuthAuthInfo, OAuthPrompt } from "@mariozechner/pi-ai";
+import { LoginDialogComponent, type AuthStorage, type ExtensionAPI, type ExtensionUIContext, type ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { OAuthAuthInfo, OAuthPrompt } from "@earendil-works/pi-ai";
 
 import type { ProviderAdapter, ProviderFamilyId } from "../adapters/types.js";
 import type { LiveModelRegistryReader } from "../models/live-registry.js";

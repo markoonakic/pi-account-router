@@ -4,6 +4,7 @@ export interface AccountDisplayInput {
   label?: string;
   identity?: string;
   summary?: string;
+  summaryUnavailableText?: string;
 }
 
 export interface FamilySectionHeaderInput {
@@ -17,12 +18,17 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
 }
 
 export function resolvePrimaryAccountName(input: AccountDisplayInput): string {
-  return firstNonEmpty(input.label, input.identity, input.providerDisplayName) ?? input.providerDisplayName;
+  return firstNonEmpty(input.label, input.identity, input.providerName, input.providerDisplayName)
+    ?? input.providerDisplayName;
 }
 
 export function formatSecondaryGhostLine(input: AccountDisplayInput): string {
+  const providerDisplayName = firstNonEmpty(input.providerDisplayName, input.providerName) ?? input.providerName;
   const summary = firstNonEmpty(input.summary);
-  return summary === undefined ? input.providerDisplayName.trim() : `${input.providerDisplayName.trim()} · ${summary}`;
+  const fallbackSummary = firstNonEmpty(input.summaryUnavailableText);
+  const detail = summary ?? fallbackSummary;
+
+  return detail === undefined ? providerDisplayName : `${providerDisplayName} · ${detail}`;
 }
 
 export function formatFamilySectionHeader(input: FamilySectionHeaderInput): string {

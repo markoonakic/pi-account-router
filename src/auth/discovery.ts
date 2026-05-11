@@ -3,6 +3,7 @@ import { getAliasIndex, getFamilyForProviderName } from "../providers/families.j
 
 export interface StoredCredential {
   type?: unknown;
+  expires?: unknown;
 }
 
 export interface AuthStorageLike {
@@ -15,6 +16,7 @@ export interface DiscoveredAccount {
   aliasIndex: number;
   authenticated: boolean;
   authType: "oauth" | "apiKey";
+  accessExpiresAt?: number;
 }
 
 function getDiscoveredAuthType(credential: StoredCredential | null | undefined): DiscoveredAccount["authType"] | undefined {
@@ -33,6 +35,12 @@ function getDiscoveredAuthType(credential: StoredCredential | null | undefined):
   return undefined;
 }
 
+function getAccessExpiresAt(credential: StoredCredential | null | undefined): number | undefined {
+  return typeof credential?.expires === "number" && Number.isFinite(credential.expires)
+    ? credential.expires
+    : undefined;
+}
+
 export function discoverAccounts(authStorage: AuthStorageLike): DiscoveredAccount[] {
   return Object.entries(authStorage.getAll())
     .flatMap(([providerName, credential]) => {
@@ -43,6 +51,7 @@ export function discoverAccounts(authStorage: AuthStorageLike): DiscoveredAccoun
         return [];
       }
 
+      const accessExpiresAt = getAccessExpiresAt(credential);
       return [
         {
           family,
@@ -50,6 +59,7 @@ export function discoverAccounts(authStorage: AuthStorageLike): DiscoveredAccoun
           aliasIndex: getAliasIndex(providerName),
           authenticated: true,
           authType,
+          ...(accessExpiresAt === undefined ? {} : { accessExpiresAt }),
         },
       ];
     })

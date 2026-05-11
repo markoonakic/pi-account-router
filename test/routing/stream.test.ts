@@ -156,7 +156,7 @@ describe("family router stream", () => {
     expect(events).toMatchObject([
       {
         type: "done",
-        message: { provider: "openai-codex-2" },
+        message: { provider: "openai-codex" },
       },
     ]);
     expect(store.getState().activeByFamily).toMatchObject({ "openai-codex": "openai-codex-2" });
@@ -219,6 +219,60 @@ describe("family router stream", () => {
     expect(store.getState().activeByFamily).toMatchObject({ "openai-codex": "openai-codex" });
   });
 
+  it("marks OAuth accounts for reauth when request auth resolves without an API key", async () => {
+    const store = createRuntimeStore();
+    store.replaceAccounts([
+      { family: "openai-codex", providerName: "openai-codex", aliasIndex: 1, authenticated: true, authType: "oauth" },
+      { family: "openai-codex", providerName: "openai-codex-2", aliasIndex: 2, authenticated: true, authType: "oauth" },
+    ] as any);
+    store.setPinnedProvider("openai-codex", "openai-codex");
+
+    store.bindModelRegistry({
+      find: (provider: string, id: string) => ({ ...createModel(provider), id }),
+      getApiKeyAndHeaders: async (model: any) => (
+        model.provider === "openai-codex"
+          ? { ok: true, headers: {} }
+          : { ok: true, apiKey: `token-${model.provider}`, headers: {} }
+      ),
+      isUsingOAuth: () => true,
+    } as any);
+
+    const attempts: string[] = [];
+    const streamSimple = vi.fn((model: any) =>
+      (async function* () {
+        attempts.push(model.provider);
+        yield {
+          type: "done",
+          reason: "stop",
+          message: createMessage(model.provider),
+        } as any;
+      })(),
+    );
+
+    const stream = createFamilyRouterStream(
+      store,
+      "openai-codex",
+      { "openai-codex": createCodexAdapter() },
+      () => ({ streamSimple }) as any,
+    );
+
+    const events = [] as any[];
+    for await (const event of stream({ provider: "openai-codex", id: "gpt-5.4" } as any, { messages: [] } as any)) {
+      events.push(event);
+    }
+
+    expect(attempts).toEqual(["openai-codex-2"]);
+    expect(events).toMatchObject([
+      {
+        type: "done",
+        message: { provider: "openai-codex" },
+      },
+    ]);
+    expect(store.getState().needsReauthByProvider).toMatchObject({
+      "openai-codex": true,
+    });
+  });
+
   it("retries Codex before visible output, switches to the next alias, and finishes successfully", async () => {
     const store = createRuntimeStore();
     store.replaceAccounts([
@@ -272,7 +326,7 @@ describe("family router stream", () => {
     expect(events).toMatchObject([
       {
         type: "done",
-        message: { provider: "openai-codex-2" },
+        message: { provider: "openai-codex" },
       },
     ]);
     expect(store.getState()).toMatchObject({
@@ -284,6 +338,72 @@ describe("family router stream", () => {
         "openai-codex": expect.any(Number),
       },
     });
+  });
+
+  it("uses snapshot scores when choosing a retry target", async () => {
+    const store = createRuntimeStore();
+    store.replaceAccounts([
+      { family: "openai-codex", providerName: "openai-codex", aliasIndex: 1, authenticated: true, authType: "oauth" },
+      { family: "openai-codex", providerName: "openai-codex-2", aliasIndex: 2, authenticated: true, authType: "oauth" },
+      { family: "openai-codex", providerName: "openai-codex-3", aliasIndex: 3, authenticated: true, authType: "oauth" },
+    ] as any);
+    store.setPinnedProvider("openai-codex", "openai-codex");
+    store.bindModelRegistry({
+      find: (provider: string, id: string) => ({ ...createModel(provider), id }),
+      getApiKeyAndHeaders: async (model: any) => ({ ok: true, apiKey: `token-${model.provider}`, headers: {} }),
+    } as any);
+
+    const attempts: string[] = [];
+    const streamSimple = vi.fn((model: any) =>
+      (async function* () {
+        attempts.push(model.provider);
+
+        if (attempts.length === 1) {
+          yield {
+            type: "error",
+            reason: "error",
+            error: createMessage(model.provider, {
+              stopReason: "error",
+              errorMessage: "429 rate limit exceeded",
+            }),
+          } as any;
+          return;
+        }
+
+        yield {
+          type: "done",
+          reason: "stop",
+          message: createMessage(model.provider),
+        } as any;
+      })(),
+    );
+
+    const stream = createFamilyRouterStream(
+      store,
+      "openai-codex",
+      { "openai-codex": createCodexAdapter() },
+      () => ({ streamSimple }) as any,
+      undefined,
+      () => ({
+        "openai-codex": 200,
+        "openai-codex-2": 0,
+        "openai-codex-3": 150,
+      }),
+    );
+
+    const events = [] as any[];
+    for await (const event of stream({ provider: "openai-codex", id: "gpt-5.4" } as any, { messages: [] } as any)) {
+      events.push(event);
+    }
+
+    expect(attempts).toEqual(["openai-codex", "openai-codex-3"]);
+    expect(events).toMatchObject([
+      {
+        type: "done",
+        message: { provider: "openai-codex" },
+      },
+    ]);
+    expect(store.getState().activeByFamily).toMatchObject({ "openai-codex": "openai-codex-3" });
   });
 
   it("does not retry after visible output has started and surfaces the error", async () => {
@@ -343,6 +463,8 @@ describe("family router stream", () => {
       { type: "text_delta", delta: "hello" },
       { type: "error", error: { provider: "openai-codex", errorMessage: "429 rate limit exceeded" } },
     ]);
+    expect(events[0].partial.provider).toBe("openai-codex");
+    expect(events[1].partial.provider).toBe("openai-codex");
     expect(store.getState()).toMatchObject({
       activeByFamily: {},
       pinnedByFamily: {},

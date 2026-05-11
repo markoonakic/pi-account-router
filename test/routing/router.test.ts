@@ -60,6 +60,26 @@ describe("family router selection", () => {
     ).toBe("openai-codex-2");
   });
 
+  it("prefers non-expired access tokens when scores tie", () => {
+    const store = createRuntimeStore();
+    store.replaceAccounts([
+      {
+        ...accounts[0]!,
+        accessExpiresAt: Date.now() - 60_000,
+      },
+      {
+        ...accounts[1]!,
+        accessExpiresAt: Date.now() + 60_000,
+      },
+      {
+        ...accounts[2]!,
+        accessExpiresAt: Date.now() - 60_000,
+      },
+    ]);
+
+    expect(selectAccountForFamily("openai-codex", store.getAccounts(), store.getState())).toBe("openai-codex-2");
+  });
+
   it("skips exhausted accounts and falls back deterministically", () => {
     const store = createRuntimeStore();
     store.replaceAccounts(accounts);

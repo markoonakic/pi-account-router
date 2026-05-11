@@ -10,6 +10,10 @@ function isEligible(account: DiscoveredAccount, state: RuntimeState, now: number
   );
 }
 
+function hasExpiredAccessToken(account: DiscoveredAccount, now: number): boolean {
+  return typeof account.accessExpiresAt === "number" && account.accessExpiresAt <= now;
+}
+
 export function selectAccountForFamily(
   family: ProviderFamilyId,
   accounts: DiscoveredAccount[],
@@ -34,6 +38,11 @@ export function selectAccountForFamily(
       const scoreDiff = (scores[right.providerName] ?? 0) - (scores[left.providerName] ?? 0);
       if (scoreDiff !== 0) {
         return scoreDiff;
+      }
+
+      const expiryDiff = Number(hasExpiredAccessToken(left, now)) - Number(hasExpiredAccessToken(right, now));
+      if (expiryDiff !== 0) {
+        return expiryDiff;
       }
 
       const aliasDiff = left.aliasIndex - right.aliasIndex;

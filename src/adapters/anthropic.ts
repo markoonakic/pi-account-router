@@ -1,4 +1,4 @@
-import { loginAnthropic, refreshAnthropicToken } from "@mariozechner/pi-ai/oauth";
+import { loginAnthropic, refreshAnthropicToken } from "@earendil-works/pi-ai/oauth";
 
 import { FAMILY_DEFS } from "../providers/families.js";
 import { createOAuthAdapter } from "./shared-oauth.js";

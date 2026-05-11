@@ -29,6 +29,7 @@ export function buildAccountCatalog(
   return accounts.map((account) => {
     const snapshot = snapshots[account.providerName];
     const providerDisplayName = ADAPTERS[account.family].displayName;
+    const summaryUnavailableText = ADAPTERS[account.family].capabilities.usage ? "usage unavailable" : undefined;
     const label = labels[account.providerName];
     const identity = snapshot?.identity;
     const summary = snapshot?.summary;
@@ -48,6 +49,7 @@ export function buildAccountCatalog(
         providerName: account.providerName,
         providerDisplayName,
         ...(summary === undefined ? {} : { summary }),
+        ...(summaryUnavailableText === undefined ? {} : { summaryUnavailableText }),
       }),
       active: state.activeByFamily[account.family] === account.providerName,
       pinned: state.pinnedByFamily[account.family] === account.providerName,

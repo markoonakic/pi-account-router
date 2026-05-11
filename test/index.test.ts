@@ -1,7 +1,27 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import installExtension from "../src/index.js";
+
+const tempDirs: string[] = [];
+
+beforeEach(() => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-account-router-index-test-"));
+  tempDirs.push(agentDir);
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+
+  for (const dir of tempDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  tempDirs.splice(0, tempDirs.length);
+});
 
 function createModelRegistry() {
   return {

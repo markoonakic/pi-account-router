@@ -1,5 +1,5 @@
-import type { Api, Model, OAuthCredentials } from "@mariozechner/pi-ai";
-import { getGitHubCopilotBaseUrl, loginGitHubCopilot, normalizeDomain, refreshGitHubCopilotToken } from "@mariozechner/pi-ai/oauth";
+import type { Api, Model, OAuthCredentials } from "@earendil-works/pi-ai";
+import { getGitHubCopilotBaseUrl, loginGitHubCopilot, normalizeDomain, refreshGitHubCopilotToken } from "@earendil-works/pi-ai/oauth";
 
 import { FAMILY_DEFS } from "../providers/families.js";
 import { createOAuthAdapter } from "./shared-oauth.js";

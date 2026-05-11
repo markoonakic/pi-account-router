@@ -1,11 +1,11 @@
-import type { ProviderModelConfig } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type LiveRegistryModel = Model<Api>;
 
 export interface LiveModelRegistryReader {
   getAll(): LiveRegistryModel[];
-  getApiKeyAndHeaders(model: LiveRegistryModel): Promise<{
+  getApiKeyAndHeaders?(model: LiveRegistryModel): Promise<{
     ok: boolean;
     headers?: Record<string, string>;
   }>;
@@ -71,6 +71,37 @@ function cloneCompat(model: LiveRegistryModel): LiveRegistryModel["compat"] | un
   return model.compat === undefined ? undefined : structuredClone(model.compat);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getMapValue(map: unknown, key: string): unknown {
+  return map instanceof Map ? map.get(key) : undefined;
+}
+
+function getStaticRequestHeaders(
+  modelRegistry: Pick<LiveModelRegistryReader, "getAll">,
+  model: LiveRegistryModel,
+): Record<string, string> | undefined {
+  const registry = modelRegistry as unknown as {
+    providerRequestConfigs?: unknown;
+    modelRequestHeaders?: unknown;
+  };
+  const providerConfig = getMapValue(registry.providerRequestConfigs, model.provider);
+  const providerHeaders = isRecord(providerConfig) && isRecord(providerConfig.headers)
+    ? providerConfig.headers as Record<string, string>
+    : undefined;
+  const modelHeaders = getMapValue(registry.modelRequestHeaders, `${model.provider}:${model.id}`);
+
+  return model.headers || providerHeaders || isRecord(modelHeaders)
+    ? {
+        ...(model.headers ?? {}),
+        ...(providerHeaders ?? {}),
+        ...(isRecord(modelHeaders) ? modelHeaders as Record<string, string> : {}),
+      }
+    : undefined;
+}
+
 export async function cloneLiveRegistryModels(
   modelRegistry: LiveModelRegistryReader,
   sourceProvider: string,
@@ -78,30 +109,27 @@ export async function cloneLiveRegistryModels(
 ): Promise<LiveRegistryModel[]> {
   const sourceModels = getLiveProviderModels(modelRegistry, sourceProvider);
 
-  return Promise.all(
-    sourceModels.map(async (sourceModel) => {
-      const auth = await modelRegistry.getApiKeyAndHeaders(sourceModel);
-      const headers = sanitizeHeaders(auth.ok ? auth.headers ?? sourceModel.headers : sourceModel.headers);
-      const compat = cloneCompat(sourceModel);
+  return sourceModels.map((sourceModel) => {
+    const headers = sanitizeHeaders(getStaticRequestHeaders(modelRegistry, sourceModel));
+    const compat = cloneCompat(sourceModel);
 
-      const clonedModel: LiveRegistryModel = {
-        id: sourceModel.id,
-        name: sourceModel.name,
-        api: sourceModel.api,
-        provider: targetProvider,
-        baseUrl: sourceModel.baseUrl,
-        reasoning: sourceModel.reasoning,
-        input: [...sourceModel.input],
-        cost: { ...sourceModel.cost },
-        contextWindow: sourceModel.contextWindow,
-        maxTokens: sourceModel.maxTokens,
-        ...(headers !== undefined ? { headers: cloneRecord(headers) } : {}),
-        ...(compat !== undefined ? { compat } : {}),
-      };
+    const clonedModel: LiveRegistryModel = {
+      id: sourceModel.id,
+      name: sourceModel.name,
+      api: sourceModel.api,
+      provider: targetProvider,
+      baseUrl: sourceModel.baseUrl,
+      reasoning: sourceModel.reasoning,
+      input: [...sourceModel.input],
+      cost: { ...sourceModel.cost },
+      contextWindow: sourceModel.contextWindow,
+      maxTokens: sourceModel.maxTokens,
+      ...(headers !== undefined ? { headers: cloneRecord(headers) } : {}),
+      ...(compat !== undefined ? { compat } : {}),
+    };
 
-      return clonedModel;
-    }),
-  );
+    return clonedModel;
+  });
 }
 
 export function toProviderModelConfigs(models: ReadonlyArray<LiveRegistryModel>): ProviderModelConfig[] {

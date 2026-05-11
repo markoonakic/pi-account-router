@@ -1,4 +1,4 @@
-import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from "@mariozechner/pi-ai";
+import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
 
 import type { AdapterCapabilities, ProviderAdapter, ProviderFamilyId } from "./types.js";
 

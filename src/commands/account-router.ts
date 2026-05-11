@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth, type TUI } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 
 import type { ProviderFamilyId } from "../adapters/types.js";
 import { FAMILY_DEFS, getFamilyForProviderName } from "../providers/families.js";
@@ -133,13 +133,21 @@ function buildPanelSections(accounts: readonly FooterAccountEntry[]): AccountPan
 }
 
 function formatPanelRowSecondaryText(account: FooterAccountEntry, providerDisplayName: string): string {
+  const family = getFamilyForProviderName(account.providerName);
+  const summaryUnavailableText = family !== undefined && FAMILY_DEFS[family].capabilities.usage
+    ? "usage unavailable"
+    : undefined;
   const secondaryText = account.secondaryText ?? formatSecondaryGhostLine({
     providerName: account.providerName,
     providerDisplayName,
     ...(account.summary === undefined ? {} : { summary: account.summary }),
+    ...(summaryUnavailableText === undefined ? {} : { summaryUnavailableText }),
   });
   const stateBits = [
+    account.active ? "active" : undefined,
     account.pinned ? "pinned" : undefined,
+    account.exhausted ? "cooldown" : undefined,
+    account.needsReauth ? "reauth" : undefined,
   ].filter((value): value is string => value !== undefined);
 
   return stateBits.length === 0 ? secondaryText : `${secondaryText} · ${stateBits.join(" · ")}`;

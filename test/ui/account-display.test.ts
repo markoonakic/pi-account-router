@@ -11,7 +11,7 @@ async function loadAccountDisplayModule(): Promise<Record<string, unknown>> {
 }
 
 describe("account display helpers", () => {
-  it("prefers the friendly label, then identity, then provider display name for the primary line", async () => {
+  it("prefers the friendly label, then identity, then provider key for the primary line", async () => {
     const accountDisplay = await loadAccountDisplayModule();
 
     expect(accountDisplay.resolvePrimaryAccountName).toBeTypeOf("function");
@@ -44,7 +44,7 @@ describe("account display helpers", () => {
         providerDisplayName: "ChatGPT Plus/Pro (Codex)",
         identity: "   ",
       }),
-    ).toBe("ChatGPT Plus/Pro (Codex)");
+    ).toBe("openai-codex-2");
   });
 
   it("formats the secondary ghost line from the provider display name and usage summary without raw aliases", async () => {
@@ -71,6 +71,14 @@ describe("account display helpers", () => {
         summary: "   ",
       }),
     ).toBe("ChatGPT Plus/Pro (Codex)");
+
+    expect(
+      accountDisplay.formatSecondaryGhostLine({
+        providerName: "openai-codex-2",
+        providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+        summaryUnavailableText: "usage unavailable",
+      }),
+    ).toBe("ChatGPT Plus/Pro (Codex) · usage unavailable");
   });
 
   it("formats family headers with the display name, total accounts, and active accounts", async () => {

@@ -2,12 +2,13 @@ import {
   createAssistantMessageEventStream,
   getApiProvider,
   type Api,
+  type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   type Model,
   type SimpleStreamOptions,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 interface ApiProviderLike {
   streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
@@ -84,12 +85,45 @@ function hasVisibleOutputStarted(event: AssistantMessageEvent): boolean {
   return event.type !== "start" && event.type !== "done" && event.type !== "error";
 }
 
+function normalizeMessageForRequestedModel(message: AssistantMessage, requestedModel: Model<Api>): AssistantMessage {
+  return {
+    ...message,
+    api: requestedModel.api,
+    provider: requestedModel.provider,
+    model: requestedModel.id,
+  };
+}
+
+function normalizeEventForRequestedModel(
+  event: AssistantMessageEvent,
+  requestedModel: Model<Api>,
+): AssistantMessageEvent {
+  switch (event.type) {
+    case "done":
+      return {
+        ...event,
+        message: normalizeMessageForRequestedModel(event.message, requestedModel),
+      };
+    case "error":
+      return {
+        ...event,
+        error: normalizeMessageForRequestedModel(event.error, requestedModel),
+      };
+    default:
+      return {
+        ...event,
+        partial: normalizeMessageForRequestedModel(event.partial, requestedModel),
+      };
+  }
+}
+
 export function createFamilyRouterStream(
   store: RuntimeStore,
   family: ProviderFamilyId,
   adapters: Partial<Record<ProviderFamilyId, ProviderAdapter>>,
   getProvider: typeof getApiProvider = getApiProvider,
   getFallbackApiProvider?: (api: Api) => ApiProviderLike | undefined,
+  getScores: () => Record<string, number> = () => ({}),
 ): (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream {
   return (model, context, options) => {
     const stream = createAssistantMessageEventStream();
@@ -104,6 +138,7 @@ export function createFamilyRouterStream(
           family,
           store.getAccounts().filter((account) => !triedProviders.has(account.providerName)),
           store.getState(),
+          getScores(),
         );
 
         if (!selectedProvider || triedProviders.has(selectedProvider)) {
@@ -120,6 +155,10 @@ export function createFamilyRouterStream(
 
         const auth = await registry.getApiKeyAndHeaders(actualModel);
         if (!auth.ok) {
+          store.markNeedsReauth(selectedProvider, true);
+          continue;
+        }
+        if (auth.apiKey === undefined && registry.isUsingOAuth(actualModel)) {
           store.markNeedsReauth(selectedProvider, true);
           continue;
         }
@@ -174,11 +213,11 @@ export function createFamilyRouterStream(
               break;
             }
 
-            stream.push(event);
+            stream.push(normalizeEventForRequestedModel(event, model));
             return;
           }
 
-          stream.push(event);
+          stream.push(normalizeEventForRequestedModel(event, model));
 
           if (event.type === "done") {
             store.setActiveProvider(family, selectedProvider);

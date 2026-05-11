@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ExtensionAPI, ProviderConfig } from "@mariozechner/pi-coding-agent";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
-import { createAssistantMessageEventStream, registerBuiltInApiProviders, resetApiProviders, streamSimple } from "@mariozechner/pi-ai";
+import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { createAssistantMessageEventStream, registerBuiltInApiProviders, resetApiProviders, streamSimple } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderAdapter } from "../../src/adapters/types.js";
@@ -105,7 +105,7 @@ describe("provider registration from the live model registry", () => {
     }
   });
 
-  it("strips secret-like resolved headers while preserving safe live override headers", async () => {
+  it("strips secret-like static headers while preserving safe live override headers", async () => {
     const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
 
     try {
@@ -114,10 +114,9 @@ describe("provider registration from the live model registry", () => {
 
       const clonedModels = await cloneLiveRegistryModels(
         {
-          getAll: () => [sourceModel!],
-          async getApiKeyAndHeaders() {
-            return {
-              ok: true,
+          getAll: () => [
+            {
+              ...sourceModel!,
               headers: {
                 Authorization: "Bearer secret",
                 "Proxy-Authorization": "Basic secret",
@@ -129,8 +128,8 @@ describe("provider registration from the live model registry", () => {
                 "x-live-override": "true",
                 "x-extra-safe": "kept",
               },
-            };
-          },
+            },
+          ],
         },
         "openai-codex",
         "openai-codex-2",
@@ -156,8 +155,37 @@ describe("provider registration from the live model registry", () => {
     }
   });
 
-  it("registers alias providers with cloned live models and the live api", async () => {
+  it("does not resolve request auth while cloning alias models", async () => {
     const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
+    const getApiKeyAndHeaders = vi.fn(async () => {
+      throw new Error("request auth should not be resolved for metadata cloning");
+    });
+
+    try {
+      await expect(
+        cloneLiveRegistryModels(
+          {
+            getAll: () => modelRegistry.getAll(),
+            getApiKeyAndHeaders,
+          },
+          "openai-codex",
+          "openai-codex-2",
+        ),
+      ).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          provider: "openai-codex-2",
+          id: "gpt-5.4",
+        }),
+      ]));
+      expect(getApiKeyAndHeaders).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("registers alias providers with cloned live models, the live api, and optional router stream", async () => {
+    const { modelRegistry, cleanup } = createRegistryWithCodexOverride();
+    const customStream = vi.fn();
     const oauth = {
       name: "ChatGPT Plus/Pro (Codex) #2",
       async login() {
@@ -191,6 +219,7 @@ describe("provider registration from the live model registry", () => {
         modelRegistry,
         adapter,
         "openai-codex-2",
+        customStream as never,
       );
 
       expect(buildAliasOAuth).toHaveBeenCalledWith(2);
@@ -204,6 +233,7 @@ describe("provider registration from the live model registry", () => {
       expect(config.api).toBe(sourceModels[0]?.api);
       expect(config.baseUrl).toBe(sourceModels[0]?.baseUrl);
       expect(config.oauth).toBe(oauth);
+      expect(config.streamSimple).toBe(customStream);
       expect(config.models).toHaveLength(sourceModels.length);
       expect(aliasModel).toMatchObject({
         id: "gpt-5.4",
@@ -263,7 +293,10 @@ describe("provider registration from the live model registry", () => {
       expect(registerProvider).toHaveBeenNthCalledWith(
         2,
         "openai-codex-2",
-        expect.objectContaining({ models: expect.any(Array) }),
+        expect.objectContaining({
+          models: expect.any(Array),
+          streamSimple: expect.any(Function),
+        }),
       );
     } finally {
       cleanup();

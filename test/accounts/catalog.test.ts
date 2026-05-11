@@ -84,10 +84,48 @@ describe("buildAccountCatalog", () => {
     expect(entries[2]).toMatchObject({
       providerName: "anthropic",
       providerDisplayName: "Anthropic (Claude Pro/Max)",
-      displayName: "Anthropic (Claude Pro/Max)",
+      displayName: "anthropic",
       secondaryText: "Anthropic (Claude Pro/Max)",
     });
     expect(entries[2]).not.toHaveProperty("label");
     expect(entries[2]).not.toHaveProperty("identity");
+  });
+
+  it("keeps anonymous usage-capable accounts distinguishable", () => {
+    const buildCatalog = buildAccountCatalog as unknown as (...args: unknown[]) => Array<Record<string, unknown>>;
+
+    const entries = buildCatalog(
+      [
+        {
+          family: "openai-codex",
+          providerName: "openai-codex",
+          aliasIndex: 1,
+          authenticated: true,
+          authType: "oauth",
+        },
+      ],
+      {
+        activeByFamily: {},
+        pinnedByFamily: {},
+        exhaustedUntilByProvider: {},
+        needsReauthByProvider: {},
+      },
+      {
+        "openai-codex": {
+          summary: "",
+          details: [],
+          score: 0,
+          badges: ["usage"],
+        },
+      },
+      {},
+    );
+
+    expect(entries[0]).toMatchObject({
+      providerName: "openai-codex",
+      providerDisplayName: "ChatGPT Plus/Pro (Codex)",
+      displayName: "openai-codex",
+      secondaryText: "ChatGPT Plus/Pro (Codex) · usage unavailable",
+    });
   });
 });

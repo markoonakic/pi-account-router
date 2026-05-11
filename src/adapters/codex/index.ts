@@ -1,4 +1,4 @@
-import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/oauth";
+import { loginOpenAICodex, refreshOpenAICodexToken } from "@earendil-works/pi-ai/oauth";
 
 import type { ProviderAdapter } from "../types.js";
 import { classifyCodexRetry } from "./classify.js";

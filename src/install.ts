@@ -1,9 +1,9 @@
-import { AuthStorage, ModelRegistry, type ExtensionAPI, type ExtensionContext, type ExtensionCommandContext, type ProviderConfig } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, ModelRegistry, type ExtensionAPI, type ExtensionContext, type ExtensionCommandContext, type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import { buildAccountCatalog, type AccountCatalogEntry } from "./accounts/catalog.js";
 import { ADAPTERS } from "./adapters/index.js";
 import type { AccountSnapshot, ProviderFamilyId } from "./adapters/types.js";
-import { getApiProvider, type Api } from "@mariozechner/pi-ai";
+import { getApiProvider, type Api } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { discoverAccounts } from "./auth/discovery.js";
 import { addAccountAndLogin, loginWithNativeLikeDialog } from "./auth/login.js";
@@ -80,8 +80,89 @@ function mergeSnapshot(
   };
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function formatAccessTokenExpiry(value: unknown, now = Date.now()): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const suffix = value <= now ? " (expired)" : "";
+  return `Access token expires: ${new Date(value).toISOString()}${suffix}`;
+}
+
+function getSafeAuthDetails(auth: unknown): string[] {
+  if (auth === undefined || auth === null || typeof auth !== "object") {
+    return ["Auth: unavailable"];
+  }
+
+  const credential = auth as { type?: unknown; accountId?: unknown; expires?: unknown };
+  const type = nonEmptyString(credential.type);
+  const accountId = nonEmptyString(credential.accountId);
+
+  return [
+    type === undefined ? undefined : `Auth: ${type}`,
+    accountId === undefined ? undefined : `Account ID: ${accountId}`,
+    formatAccessTokenExpiry(credential.expires),
+  ].filter((value): value is string => value !== undefined);
+}
+
+function getAccountDetailsLines(
+  providerName: string,
+  account: AccountCatalogEntry | undefined,
+  snapshot: AccountSnapshot | undefined,
+  auth: unknown,
+): string[] {
+  const snapshotDetails = snapshot?.details.filter((detail) => detail.trim().length > 0) ?? [];
+  const hasSummary = snapshot?.summary.trim().length ? true : false;
+  const usageUnavailable = account !== undefined
+    && ADAPTERS[account.family].capabilities.usage
+    && !hasSummary
+    && snapshotDetails.length === 0;
+  const primaryDetails = snapshotDetails.length > 0
+    ? snapshotDetails
+    : usageUnavailable
+      ? ["Usage unavailable"]
+      : ["No additional details available yet."];
+
+  return [
+    ...primaryDetails,
+    `Provider key: ${providerName}`,
+    ...getSafeAuthDetails(auth),
+  ];
+}
+
 function getAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME ?? process.cwd(), ".pi", "agent");
+}
+
+function isContextCancelled(ctx: Partial<Pick<ExtensionContext, "signal">>): boolean {
+  try {
+    return ctx.signal?.aborted === true;
+  } catch (error) {
+    if (isStaleContextError(error)) {
+      return true;
+    }
+    throw error;
+  }
+}
+
+function isStaleContextError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("ctx is stale after session replacement or reload");
+}
+
+function safeHasUI(ctx: Pick<ExtensionContext, "hasUI">): boolean {
+  try {
+    return ctx.hasUI;
+  } catch (error) {
+    if (isStaleContextError(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function cloneStartupProviderModels(sourceProvider: string, targetProvider: string, modelRegistry: ModelRegistry) {
@@ -212,6 +293,12 @@ export function installAccountRouter(
     }
   }
 
+  function getSnapshotScores(): Record<string, number> {
+    return Object.fromEntries(
+      Object.entries(snapshots).map(([providerName, snapshot]) => [providerName, snapshot?.score ?? 0]),
+    );
+  }
+
   function clearLabel(providerName: string, cwd: string): void {
     const settings = loadAccountRouterSettings(cwd);
     if (!Object.hasOwn(settings.labels, providerName)) {
@@ -258,8 +345,18 @@ export function installAccountRouter(
   }
 
   function updateStatus(ctx: ExtensionContext, catalog: AccountCatalogEntry[]): void {
-    const settings = loadAccountRouterSettings(ctx.cwd);
-    ctx.ui.setStatus("account-router", settings.showFooter ? renderFooter(getFooterEntry(ctx, catalog)) : undefined);
+    if (!safeHasUI(ctx) || isContextCancelled(ctx)) {
+      return;
+    }
+
+    try {
+      const settings = loadAccountRouterSettings(ctx.cwd);
+      ctx.ui.setStatus("account-router", settings.showFooter ? renderFooter(getFooterEntry(ctx, catalog)) : undefined);
+    } catch (error) {
+      if (!isStaleContextError(error)) {
+        throw error;
+      }
+    }
   }
 
   function syncAccountsFromContext(ctx: ExtensionContext): AccountCatalogEntry[] {
@@ -273,6 +370,12 @@ export function installAccountRouter(
     store.bindModelRegistry(ctx.modelRegistry);
     store.replaceAccounts(discoverAccounts(ctx.modelRegistry.authStorage));
     snapshots = await buildSnapshots(ctx);
+
+    if (isContextCancelled(ctx)) {
+      refreshActiveSelections();
+      return buildCatalog();
+    }
+
     saveAccountRouterSnapshotCache(undefined, { snapshots });
     refreshActiveSelections();
 
@@ -290,12 +393,31 @@ export function installAccountRouter(
       modelRegistry: ctx.modelRegistry,
       adapters: ADAPTERS,
       discoveredProviderNames: store.getAccounts().map((account) => account.providerName),
-      createStream: (family) => createFamilyRouterStream(store, family, ADAPTERS, undefined, getOriginalApiProvider),
+      createStream: (family) => (
+        createFamilyRouterStream(store, family, ADAPTERS, undefined, getOriginalApiProvider, getSnapshotScores)
+      ),
     });
 
     const catalog = buildCatalog();
     updateStatus(ctx, catalog);
     return catalog;
+  }
+
+  async function refreshFromEventContext(ctx: ExtensionContext): Promise<void> {
+    await refreshFromContext(ctx).catch((error) => {
+      if (isStaleContextError(error) || isContextCancelled(ctx) || !safeHasUI(ctx)) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
+      } catch (notifyError) {
+        if (!isStaleContextError(notifyError)) {
+          throw notifyError;
+        }
+      }
+    });
   }
 
   registerAccountRouterCommand(pi, {
@@ -396,11 +518,12 @@ export function installAccountRouter(
     async showAccountDetails(providerName: string, ctx: ExtensionCommandContext) {
       const snapshot = snapshots[providerName];
       const account = buildCatalog().find((entry) => entry.providerName === providerName);
+      const auth = ctx.modelRegistry.authStorage.get(providerName);
       const action = await showAccountDetailsMenu(ctx.ui, {
         providerName,
         displayName: account?.displayName ?? providerName,
         summary: snapshot?.summary,
-        details: snapshot?.details.length ? snapshot.details : ["No additional details available yet."],
+        details: getAccountDetailsLines(providerName, account, snapshot, auth),
         hasLabel: account?.label !== undefined,
       });
 
@@ -443,23 +566,18 @@ export function installAccountRouter(
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await refreshFromContext(ctx).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
-    });
+    await refreshFromEventContext(ctx);
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    await refreshFromContext(ctx).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
-    });
+    await refreshFromEventContext(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    await refreshFromContext(ctx).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Account router refresh failed: ${message}`, "error");
-    });
+    if (!safeHasUI(ctx)) {
+      return;
+    }
+
+    await refreshFromEventContext(ctx);
   });
 }

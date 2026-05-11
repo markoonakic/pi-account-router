@@ -1,4 +1,4 @@
-import { initTheme } from "@mariozechner/pi-coding-agent";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderAdapter } from "../../src/adapters/types.js";

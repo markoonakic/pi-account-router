@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ProviderConfig } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import type { ProviderAdapter, ProviderFamilyId } from "../adapters/types.js";
 import {
@@ -28,6 +28,7 @@ export async function registerAliasProvider(
   modelRegistry: LiveModelRegistryReader,
   adapter: Pick<ProviderAdapter, "family" | "buildAliasOAuth">,
   providerName: string,
+  streamSimple?: NonNullable<ProviderConfig["streamSimple"]>,
 ): Promise<void> {
   const clonedModels = await cloneLiveRegistryModels(modelRegistry, adapter.family, providerName);
   const firstModel = clonedModels[0];
@@ -41,6 +42,7 @@ export async function registerAliasProvider(
     api: firstModel.api,
     models: toProviderModelConfigs(clonedModels),
     oauth: adapter.buildAliasOAuth(getAliasIndex(providerName)) as NonNullable<ProviderConfig["oauth"]>,
+    ...(streamSimple === undefined ? {} : { streamSimple }),
   });
 }
 
@@ -94,7 +96,13 @@ export async function syncProviders(options: {
         continue;
       }
 
-      await registerAliasProvider(options.pi, options.modelRegistry, adapter, providerName);
+      await registerAliasProvider(
+        options.pi,
+        options.modelRegistry,
+        adapter,
+        providerName,
+        options.createStream(adapter.family),
+      );
     }
   }
 }

@@ -22,9 +22,24 @@ const AUTH_PATTERNS = [
   /session expired/i,
 ];
 
+const MODEL_UNSUPPORTED_PATTERNS = [
+  /model is not supported/i,
+  /not supported when using codex with a chatgpt account/i,
+];
+
 const QUOTA_COOLDOWN_MS = 60 * 60 * 1000;
+const MODEL_UNSUPPORTED_COOLDOWN_MS = 24 * QUOTA_COOLDOWN_MS;
 
 export function classifyCodexRetry(message: string): RetryDisposition {
+  if (MODEL_UNSUPPORTED_PATTERNS.some((pattern) => pattern.test(message))) {
+    return {
+      action: "retry",
+      reason: "quota",
+      cooldownUntil: Date.now() + MODEL_UNSUPPORTED_COOLDOWN_MS,
+      clearPin: true,
+    };
+  }
+
   if (QUOTA_PATTERNS.some((pattern) => pattern.test(message))) {
     return {
       action: "retry",
